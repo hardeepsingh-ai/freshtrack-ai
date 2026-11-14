@@ -3,52 +3,167 @@
 
 {% block head %}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<style>
+    .dash-stats {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        padding: 0 16px;
+        margin-bottom: 8px;
+    }
+    .dash-stat {
+        background: var(--card);
+        border-radius: 14px;
+        padding: 16px;
+        box-shadow: var(--shadow);
+        position: relative;
+        overflow: hidden;
+    }
+    .dash-stat .icon {
+        position: absolute;
+        top: 12px; right: 12px;
+        width: 36px; height: 36px;
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .dash-stat .icon svg { width: 18px; height: 18px; }
+    .dash-stat .value {
+        font-size: 26px;
+        font-weight: 700;
+        line-height: 1;
+    }
+    .dash-stat .label {
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-top: 4px;
+    }
+    .dash-stat.green .value { color: var(--accent-dark); }
+    .dash-stat.green .icon { background: #f0fdf4; color: var(--accent-dark); }
+    .dash-stat.red .value { color: var(--danger); }
+    .dash-stat.red .icon { background: #fef2f2; color: var(--danger); }
+    .dash-stat.amber .value { color: var(--warning); }
+    .dash-stat.amber .icon { background: #fffbeb; color: var(--warning); }
+    .dash-stat.blue .value { color: #3b82f6; }
+    .dash-stat.blue .icon { background: #eff6ff; color: #3b82f6; }
+
+    .chart-card {
+        background: var(--card);
+        border-radius: 14px;
+        padding: 16px;
+        margin: 12px 16px;
+        box-shadow: var(--shadow);
+    }
+    .chart-card h2 {
+        font-size: 15px;
+        margin-bottom: 10px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .chart-card h2 svg { width: 16px; height: 16px; color: var(--text-muted); }
+    .chart-area { width: 100%; height: 220px; position: relative; }
+    .empty-chart {
+        text-align: center;
+        padding: 40px 16px;
+        color: var(--text-muted);
+        font-size: 14px;
+    }
+
+    .insights-card {
+        background: linear-gradient(135deg, #f0fdf4, #ecfdf5);
+        border: 1px solid #bbf7d0;
+        border-radius: 14px;
+        padding: 16px;
+        margin: 12px 16px;
+    }
+    .insights-card h2 {
+        font-size: 15px;
+        color: var(--accent-dark);
+        margin-bottom: 10px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .insights-card h2 svg { width: 16px; height: 16px; }
+    #insights-content {
+        font-size: 14px;
+        line-height: 1.7;
+        white-space: pre-line;
+        color: var(--text);
+    }
+    .refresh-btn {
+        background: none;
+        border: 1px solid var(--accent);
+        color: var(--accent-dark);
+        padding: 6px 14px;
+        border-radius: 8px;
+        font-size: 13px;
+        cursor: pointer;
+        margin-top: 10px;
+    }
+</style>
 {% endblock %}
 
 {% block content %}
 <div class="header">
-    <h1>Owner Dashboard</h1>
-    <p>Waste analytics & AI insights</p>
+    <h1>Dashboard</h1>
+    <p>Store overview & AI insights</p>
 </div>
 
-<div class="stats" id="dash-stats">
-    <div class="stat">
-        <div class="number" id="d-stock">-</div>
+<div class="dash-stats">
+    <div class="dash-stat green">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg></div>
+        <div class="value" id="d-stock">-</div>
         <div class="label">Total Stock</div>
     </div>
-    <div class="stat danger">
-        <div class="number" id="d-expiring">-</div>
+    <div class="dash-stat red">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
+        <div class="value" id="d-expiring">-</div>
         <div class="label">Expiring Soon</div>
     </div>
-    <div class="stat warning">
-        <div class="number" id="d-waste">-</div>
+    <div class="dash-stat amber">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></div>
+        <div class="value" id="d-waste">-</div>
         <div class="label">Waste Cost (7d)</div>
     </div>
-    <div class="stat">
-        <div class="number" id="d-products">-</div>
+    <div class="dash-stat blue">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></div>
+        <div class="value" id="d-products">-</div>
         <div class="label">Products</div>
     </div>
 </div>
 
-<div class="card">
-    <h2>Waste Trend (30 days)</h2>
-    <div class="chart-container">
+<div class="chart-card">
+    <h2>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        Waste Trend (30 days)
+    </h2>
+    <div class="chart-area" id="waste-chart-area">
         <canvas id="waste-chart"></canvas>
     </div>
 </div>
 
-<div class="card">
-    <h2>Top Wasted Items</h2>
-    <div class="chart-container">
+<div class="chart-card">
+    <h2>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg>
+        Top Wasted Items
+    </h2>
+    <div class="chart-area" id="top-chart-area">
         <canvas id="top-waste-chart"></canvas>
     </div>
 </div>
 
-<div class="insights-box" id="ai-insights">
-    <h3>AI Insights</h3>
+<div class="insights-card">
+    <h2>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7z"/><line x1="9" y1="22" x2="15" y2="22"/></svg>
+        AI Insights
+    </h2>
     <div id="insights-content">
         <div class="loading"><div class="spinner"></div>Analysing your data...</div>
     </div>
+    <button class="refresh-btn" onclick="loadInsights()">Refresh Insights</button>
 </div>
 {% endblock %}
 
@@ -70,7 +185,6 @@ async function loadDashboard() {
         document.getElementById('d-waste').textContent = '£' + (stats.waste_this_week?.cost || 0).toFixed(2);
         document.getElementById('d-products').textContent = stats.unique_products || 0;
 
-        // Waste trend chart
         if (trend.trend?.length) {
             new Chart(document.getElementById('waste-chart'), {
                 type: 'line',
@@ -80,31 +194,37 @@ async function loadDashboard() {
                         label: 'Daily Waste (£)',
                         data: trend.trend.map(t => t.cost),
                         borderColor: '#ef4444',
-                        backgroundColor: 'rgba(239,68,68,0.1)',
+                        backgroundColor: 'rgba(239,68,68,0.08)',
                         fill: true,
-                        tension: 0.3,
+                        tension: 0.4,
+                        pointRadius: 3,
+                        pointBackgroundColor: '#ef4444',
                     }]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
                     plugins: { legend: { display: false } },
-                    scales: { y: { beginAtZero: true, ticks: { callback: v => '£' + v } } }
+                    scales: {
+                        y: { beginAtZero: true, ticks: { callback: v => '£' + v }, grid: { color: 'rgba(0,0,0,0.04)' } },
+                        x: { grid: { display: false } }
+                    }
                 }
             });
+        } else {
+            document.getElementById('waste-chart-area').innerHTML = '<div class="empty-chart">No waste data yet — start logging waste to see trends</div>';
         }
 
-        // Top wasted chart
         if (top.top_wasted?.length) {
             new Chart(document.getElementById('top-waste-chart'), {
                 type: 'bar',
                 data: {
-                    labels: top.top_wasted.map(t => t.name.slice(0, 15)),
+                    labels: top.top_wasted.map(t => t.name.length > 18 ? t.name.slice(0, 18) + '…' : t.name),
                     datasets: [{
                         label: 'Waste Cost (£)',
                         data: top.top_wasted.map(t => t.cost),
-                        backgroundColor: '#f59e0b',
-                        borderRadius: 6,
+                        backgroundColor: ['#f59e0b', '#fb923c', '#fbbf24', '#f97316', '#fcd34d', '#fdba74', '#fde68a', '#fed7aa', '#fef3c7', '#ffedd5'],
+                        borderRadius: 8,
                     }]
                 },
                 options: {
@@ -112,9 +232,14 @@ async function loadDashboard() {
                     responsive: true,
                     maintainAspectRatio: false,
                     plugins: { legend: { display: false } },
-                    scales: { x: { beginAtZero: true, ticks: { callback: v => '£' + v } } }
+                    scales: {
+                        x: { beginAtZero: true, ticks: { callback: v => '£' + v }, grid: { color: 'rgba(0,0,0,0.04)' } },
+                        y: { grid: { display: false } }
+                    }
                 }
             });
+        } else {
+            document.getElementById('top-chart-area').innerHTML = '<div class="empty-chart">No waste recorded yet</div>';
         }
     } catch {
         document.getElementById('d-stock').textContent = '0';
@@ -123,15 +248,20 @@ async function loadDashboard() {
         document.getElementById('d-products').textContent = '0';
     }
 
-    // AI Insights
+    loadInsights();
+}
+
+async function loadInsights() {
+    document.getElementById('insights-content').innerHTML = '<div class="loading"><div class="spinner"></div>Analysing your data...</div>';
     try {
         const resp = await fetch('/api/ai/insights');
         const data = await resp.json();
         document.getElementById('insights-content').textContent = data.insights;
     } catch {
-        document.getElementById('insights-content').textContent = 'AI insights unavailable. Add GROQ_API_KEY to enable.';
+        document.getElementById('insights-content').textContent = 'Add stock and waste data to unlock AI insights.';
     }
 }
+
 loadDashboard();
 </script>
 {% endblock %}

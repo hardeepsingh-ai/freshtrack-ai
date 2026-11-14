@@ -3,27 +3,133 @@
 
 {% block head %}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
+<style>
+    .scan-header { position: relative; }
+    .scan-count {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: var(--accent);
+        color: #fff;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 13px;
+        font-weight: 600;
+        margin-top: 6px;
+    }
+    .scanner-wrapper {
+        position: relative;
+        width: 100%;
+        max-width: 400px;
+        margin: 0 auto;
+        border-radius: 16px;
+        overflow: hidden;
+        background: #111;
+        aspect-ratio: 4/3;
+    }
+    .scanner-wrapper video { width: 100%; height: 100%; object-fit: cover; }
+    .scanner-wrapper canvas { display: none; }
+    .scan-overlay {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        pointer-events: none;
+    }
+    .scan-target {
+        width: 70%;
+        height: 40%;
+        border: 2px solid rgba(34,197,94,0.7);
+        border-radius: 12px;
+        box-shadow: 0 0 0 9999px rgba(0,0,0,0.35);
+    }
+    .scan-line {
+        position: absolute;
+        left: 15%;
+        right: 15%;
+        height: 2px;
+        background: var(--accent);
+        box-shadow: 0 0 8px var(--accent);
+        animation: scanMove 2s ease-in-out infinite;
+    }
+    @keyframes scanMove {
+        0%, 100% { top: 35%; }
+        50% { top: 60%; }
+    }
+    .scan-hint {
+        position: absolute;
+        bottom: 12px;
+        left: 0; right: 0;
+        text-align: center;
+        color: rgba(255,255,255,0.8);
+        font-size: 13px;
+        text-shadow: 0 1px 3px rgba(0,0,0,0.6);
+    }
+    .scanner-off {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        color: #666;
+        gap: 8px;
+        height: 100%;
+    }
+    .scanner-off svg { width: 48px; height: 48px; opacity: 0.4; }
+    .quick-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 12px;
+    }
+    .quick-actions .btn { flex: 1; padding: 12px 8px; font-size: 14px; }
+    .form-row { display: flex; gap: 10px; }
+    .form-row .form-group { flex: 1; }
+    .success-banner {
+        background: linear-gradient(135deg, #f0fdf4, #dcfce7);
+        border: 1px solid #bbf7d0;
+        border-radius: 10px;
+        padding: 14px;
+        text-align: center;
+        margin-bottom: 14px;
+        animation: slideIn 0.3s ease;
+    }
+    .success-banner h3 { color: var(--accent-dark); font-size: 15px; }
+    .success-banner p { color: var(--text-muted); font-size: 13px; margin-top: 2px; }
+    @keyframes slideIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+</style>
 {% endblock %}
 
 {% block content %}
-<div class="header">
-    <h1>Scan Barcode</h1>
-    <p>Scan or type a barcode to add stock</p>
+<div class="header scan-header">
+    <h1>Scan & Add</h1>
+    <p>Point camera at barcode — any angle works</p>
+    <div class="scan-count" id="session-count" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="20 6 9 17 4 12"/></svg>
+        <span id="count-text">0 added</span>
+    </div>
 </div>
 
 <div class="card">
-    <div id="scanner-container"></div>
-    <div style="text-align:center; margin: 12px 0;">
-        <button class="btn btn-outline" onclick="toggleScanner()" id="scan-btn" style="width:auto; display:inline-block; padding:10px 24px;">Start Camera</button>
+    <div class="scanner-wrapper" id="scanner-container">
+        <div class="scanner-off" id="scanner-placeholder">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+            <span>Tap to start scanning</span>
+        </div>
     </div>
-    <div class="form-group">
-        <label>Or type barcode manually</label>
-        <input type="text" id="barcode-input" placeholder="e.g. 5000128065253" inputmode="numeric" pattern="[0-9]*">
+    <div class="quick-actions">
+        <button class="btn btn-primary" onclick="toggleScanner()" id="scan-btn">Start Camera</button>
+        <button class="btn btn-outline" onclick="showManualInput()" id="manual-btn" style="flex:0.6;">Type Code</button>
     </div>
-    <button class="btn btn-primary" onclick="lookupBarcode()">Look Up Product</button>
+    <div id="manual-input-area" style="display:none; margin-top:12px;">
+        <div class="form-group" style="margin-bottom:8px;">
+            <input type="text" id="barcode-input" placeholder="Enter barcode number" inputmode="numeric" pattern="[0-9]*">
+        </div>
+        <button class="btn btn-primary" onclick="lookupBarcode()">Look Up</button>
+    </div>
 </div>
 
 <div class="card" id="product-result" style="display:none;">
+    <div id="success-area"></div>
     <div class="product-info" id="product-display"></div>
     <form id="add-stock-form">
         <input type="hidden" id="form-barcode">
@@ -32,21 +138,25 @@
             <label>Product Name</label>
             <input type="text" id="form-name-display" readonly>
         </div>
-        <div class="form-group">
-            <label>Quantity</label>
-            <input type="number" id="form-quantity" min="1" value="1" required>
+        <div class="form-row">
+            <div class="form-group">
+                <label>Quantity</label>
+                <input type="number" id="form-quantity" min="1" value="1" required>
+            </div>
+            <div class="form-group">
+                <label>Expiry Date</label>
+                <input type="date" id="form-expiry" required>
+            </div>
         </div>
-        <div class="form-group">
-            <label>Expiry Date</label>
-            <input type="date" id="form-expiry" required>
-        </div>
-        <div class="form-group">
-            <label>Cost Price (£ per item)</label>
-            <input type="number" id="form-cost" step="0.01" min="0" placeholder="0.00">
-        </div>
-        <div class="form-group">
-            <label>Sell Price (£ per item)</label>
-            <input type="number" id="form-sell" step="0.01" min="0" placeholder="0.00">
+        <div class="form-row">
+            <div class="form-group">
+                <label>Cost Price (£)</label>
+                <input type="number" id="form-cost" step="0.01" min="0" placeholder="0.00">
+            </div>
+            <div class="form-group">
+                <label>Sell Price (£)</label>
+                <input type="number" id="form-sell" step="0.01" min="0" placeholder="0.00">
+            </div>
         </div>
         <button type="submit" class="btn btn-primary">Add to Stock</button>
     </form>
@@ -56,49 +166,105 @@
 {% block scripts %}
 <script>
 let scanning = false;
+let sessionAdded = 0;
+let lastDetected = '';
+let detectCooldown = false;
 
 function toggleScanner() {
     if (scanning) {
-        Quagga.stop();
-        document.getElementById('scanner-container').innerHTML = '';
-        document.getElementById('scan-btn').textContent = 'Start Camera';
-        scanning = false;
+        stopScanner();
     } else {
-        Quagga.init({
-            inputStream: {
-                name: "Live",
-                type: "LiveStream",
-                target: document.getElementById('scanner-container'),
-                constraints: { facingMode: "environment" }
-            },
-            decoder: { readers: ["ean_reader", "ean_8_reader", "upc_reader"] }
-        }, function(err) {
-            if (err) { showToast('Camera not available'); return; }
-            Quagga.start();
-            scanning = true;
-            document.getElementById('scan-btn').textContent = 'Stop Camera';
-        });
+        startScanner();
+    }
+}
 
-        Quagga.onDetected(function(result) {
-            const code = result.codeResult.code;
-            document.getElementById('barcode-input').value = code;
-            Quagga.stop();
-            document.getElementById('scanner-container').innerHTML = '';
-            document.getElementById('scan-btn').textContent = 'Start Camera';
-            scanning = false;
-            showToast('Barcode detected: ' + code);
-            lookupBarcode();
-        });
+function startScanner() {
+    document.getElementById('scanner-placeholder')?.remove();
+    Quagga.init({
+        inputStream: {
+            name: "Live",
+            type: "LiveStream",
+            target: document.getElementById('scanner-container'),
+            constraints: {
+                facingMode: "environment",
+                width: { ideal: 1280 },
+                height: { ideal: 720 }
+            }
+        },
+        locator: {
+            patchSize: "medium",
+            halfSample: true
+        },
+        numOfWorkers: navigator.hardwareConcurrency || 2,
+        frequency: 15,
+        decoder: {
+            readers: ["ean_reader", "ean_8_reader", "upc_reader", "upc_e_reader", "code_128_reader", "code_39_reader"],
+            multiple: false
+        },
+        locate: true
+    }, function(err) {
+        if (err) { showToast('Camera not available'); return; }
+        Quagga.start();
+        scanning = true;
+        document.getElementById('scan-btn').textContent = 'Stop Camera';
+
+        // Add scan overlay
+        const container = document.getElementById('scanner-container');
+        const overlay = document.createElement('div');
+        overlay.className = 'scan-overlay';
+        overlay.id = 'scan-overlay';
+        overlay.innerHTML = '<div class="scan-target"></div><div class="scan-line"></div><div class="scan-hint">Hold steady — scanning all angles</div>';
+        container.appendChild(overlay);
+    });
+
+    Quagga.onDetected(function(result) {
+        if (detectCooldown) return;
+        const code = result.codeResult.code;
+        if (!code || code === lastDetected) return;
+
+        // Confidence check — only accept if error count is low
+        const errors = result.codeResult.decodedCodes
+            ?.filter(d => d.error !== undefined)
+            ?.map(d => d.error) || [];
+        const avgError = errors.length ? errors.reduce((a, b) => a + b, 0) / errors.length : 1;
+        if (avgError > 0.25) return;
+
+        lastDetected = code;
+        detectCooldown = true;
+        setTimeout(() => { detectCooldown = false; lastDetected = ''; }, 2000);
+
+        document.getElementById('barcode-input').value = code;
+        showToast('Scanned: ' + code);
+
+        // Don't stop camera — keep scanning ready
+        lookupBarcode();
+    });
+}
+
+function stopScanner() {
+    Quagga.stop();
+    document.getElementById('scan-overlay')?.remove();
+    document.getElementById('scan-btn').textContent = 'Start Camera';
+    scanning = false;
+}
+
+function showManualInput() {
+    const area = document.getElementById('manual-input-area');
+    area.style.display = area.style.display === 'none' ? 'block' : 'none';
+    if (area.style.display === 'block') {
+        document.getElementById('barcode-input').focus();
     }
 }
 
 async function lookupBarcode() {
-    const barcode = document.getElementById('barcode-input').value.trim();
+    const barcode = document.getElementById('barcode-input')?.value?.trim() || lastDetected;
     if (!barcode) { showToast('Enter a barcode'); return; }
 
     const display = document.getElementById('product-display');
-    display.innerHTML = '<div class="loading"><div class="spinner"></div>Looking up...</div>';
+    display.innerHTML = '<div class="loading"><div class="spinner"></div>Looking up product...</div>';
     document.getElementById('product-result').style.display = 'block';
+    document.getElementById('success-area').innerHTML = '';
+    document.getElementById('product-result').scrollIntoView({ behavior: 'smooth', block: 'start' });
 
     try {
         const resp = await fetch('/api/product/' + barcode);
@@ -106,25 +272,30 @@ async function lookupBarcode() {
 
         if (data.found) {
             display.innerHTML = `
-                ${data.image ? `<img src="${data.image}" alt="${data.name}">` : ''}
+                ${data.image ? `<img src="${data.image}" alt="${data.name}" style="width:60px;height:60px;border-radius:8px;object-fit:cover;">` : ''}
                 <div class="details">
                     <h3>${data.name}</h3>
-                    <p>${data.brand || 'Unknown brand'}</p>
+                    <p>${data.brand || 'Unknown brand'} · ${data.category || ''}</p>
                 </div>`;
             document.getElementById('form-barcode').value = barcode;
             document.getElementById('form-name').value = data.name;
             document.getElementById('form-name-display').value = data.name;
+            document.getElementById('form-name-display').readOnly = true;
         } else {
-            display.innerHTML = `<div class="details"><h3>Product not found</h3><p>Type the name below</p></div>`;
+            display.innerHTML = `<div class="details"><h3 style="color:var(--warning);">Not in database</h3><p>No worries — type the name below</p></div>`;
             document.getElementById('form-barcode').value = barcode;
+            document.getElementById('form-name').value = '';
             document.getElementById('form-name-display').value = '';
             document.getElementById('form-name-display').readOnly = false;
-            document.getElementById('form-name-display').placeholder = 'Type product name';
+            document.getElementById('form-name-display').placeholder = 'e.g. Hair Spray, Batteries, etc.';
+            document.getElementById('form-name-display').focus();
         }
     } catch {
         display.innerHTML = '<div class="details"><h3>Lookup failed</h3><p>Type the name manually</p></div>';
         document.getElementById('form-barcode').value = barcode;
+        document.getElementById('form-name').value = '';
         document.getElementById('form-name-display').readOnly = false;
+        document.getElementById('form-name-display').placeholder = 'Type product name';
     }
 }
 
@@ -145,11 +316,36 @@ document.getElementById('add-stock-form').addEventListener('submit', async funct
         const resp = await fetch('/api/stock/add', { method: 'POST', body });
         const data = await resp.json();
         if (data.success) {
-            showToast('Stock added!');
+            sessionAdded++;
+            const countEl = document.getElementById('session-count');
+            countEl.style.display = 'inline-flex';
+            document.getElementById('count-text').textContent = sessionAdded + ' added this session';
+
+            // Show success then reset for next scan
+            document.getElementById('success-area').innerHTML = `
+                <div class="success-banner">
+                    <h3>✓ ${name} added</h3>
+                    <p>${document.getElementById('form-quantity').value} units · expires ${document.getElementById('form-expiry').value}</p>
+                </div>`;
+
+            // Reset form
             document.getElementById('form-quantity').value = 1;
             document.getElementById('form-expiry').value = '';
             document.getElementById('form-cost').value = '';
             document.getElementById('form-sell').value = '';
+            document.getElementById('form-name').value = '';
+            document.getElementById('form-name-display').value = '';
+            document.getElementById('form-name-display').readOnly = true;
+            document.getElementById('product-display').innerHTML = '';
+
+            // Auto-hide the form after 2s so scanner is ready
+            setTimeout(() => {
+                document.getElementById('product-result').style.display = 'none';
+                document.getElementById('success-area').innerHTML = '';
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            }, 2000);
+
+            showToast('Stock added!');
         } else {
             showToast('Error adding stock');
         }
