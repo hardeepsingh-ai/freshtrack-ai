@@ -54,6 +54,49 @@
 {% endblock %}
 
 {% block scripts %}
+<style>
+    .stock-item {
+        padding: 12px 0;
+        border-bottom: 1px solid var(--border);
+    }
+    .stock-item:last-child { border-bottom: none; }
+    .stock-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .stock-batches {
+        margin-top: 8px;
+        padding-left: 8px;
+        font-size: 13px;
+    }
+    .batch-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 6px 0;
+        border-top: 1px dashed var(--border);
+    }
+    .batch-row:first-child { border-top: none; }
+    .delete-btn {
+        background: none;
+        border: 1px solid var(--danger);
+        color: var(--danger);
+        padding: 4px 10px;
+        border-radius: 6px;
+        font-size: 12px;
+        cursor: pointer;
+    }
+    .delete-btn:active { background: #fef2f2; }
+    .expand-btn {
+        background: none;
+        border: none;
+        color: var(--accent-dark);
+        font-size: 12px;
+        cursor: pointer;
+        padding: 4px 0;
+    }
+</style>
 <script>
 function showShelfCount() {
     document.getElementById('shelf-count-form').style.display = 'block';
@@ -93,6 +136,23 @@ async function submitSale() {
     } catch { showToast('Error recording sale'); }
 }
 
+async function deleteStock(id, name) {
+    if (!confirm(`Delete "${name}" from stock?`)) return;
+    try {
+        const resp = await fetch('/api/stock/' + id, { method: 'DELETE' });
+        const data = await resp.json();
+        if (data.success) {
+            showToast('Deleted');
+            loadStock();
+        }
+    } catch { showToast('Error deleting'); }
+}
+
+function toggleBatches(barcode) {
+    const el = document.getElementById('batches-' + barcode);
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
 async function loadStock() {
     try {
         const resp = await fetch('/api/stock/current');
@@ -114,18 +174,35 @@ async function loadStock() {
             const total = info.batches.reduce((a, b) => a + b.quantity, 0);
             const earliest = info.batches[0].expiry_date;
             const days = Math.ceil((new Date(earliest) - new Date()) / 86400000);
-            const color = days <= 1 ? 'var(--danger)' : days <= 3 ? 'var(--warning)' : 'var(--text)';
+            const color = days <= 1 ? 'var(--danger)' : days <= 3 ? 'var(--warning)' : 'var(--text-muted)';
 
-            return `<div style="padding:12px 0; border-bottom:1px solid var(--border);">
-                <div style="display:flex; justify-content:space-between; align-items:center;">
+            const batchRows = info.batches.map(b => {
+                const bDays = Math.ceil((new Date(b.expiry_date) - new Date()) / 86400000);
+                const bColor = bDays <= 1 ? 'var(--danger)' : bDays <= 3 ? 'var(--warning)' : 'var(--text-muted)';
+                return `<div class="batch-row">
+                    <div>
+                        <span>Qty: ${b.quantity}</span>
+                        <span style="color:${bColor}; margin-left:8px;">exp ${b.expiry_date}</span>
+                        ${b.cost_price ? `<span style="margin-left:8px;">£${Number(b.cost_price).toFixed(2)}</span>` : ''}
+                    </div>
+                    <button class="delete-btn" onclick="deleteStock(${b.id}, '${info.name.replace(/'/g, "\\'")}')">Delete</button>
+                </div>`;
+            }).join('');
+
+            return `<div class="stock-item">
+                <div class="stock-row">
                     <div>
                         <strong>${info.name}</strong>
-                        <div style="font-size:12px; color:var(--text-muted);">${barcode} &middot; ${info.batches.length} batch${info.batches.length > 1 ? 'es' : ''}</div>
+                        <div style="font-size:12px; color:var(--text-muted);">${barcode}</div>
                     </div>
                     <div style="text-align:right;">
                         <div style="font-size:18px; font-weight:700;">${total}</div>
                         <div style="font-size:11px; color:${color};">exp ${earliest}</div>
                     </div>
+                </div>
+                <button class="expand-btn" onclick="toggleBatches('${barcode}')">Show batches (${info.batches.length})</button>
+                <div class="stock-batches" id="batches-${barcode}" style="display:none;">
+                    ${batchRows}
                 </div>
             </div>`;
         }).join('');

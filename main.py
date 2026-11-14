@@ -450,6 +450,19 @@ Keep it under 300 words. Use British English."""
     return JSONResponse({"insights": insights})
 
 
+@app.delete("/api/stock/{stock_id}")
+async def delete_stock(stock_id: int):
+    """Delete a stock item."""
+    if not supabase:
+        raise HTTPException(503, "Database not configured")
+    supabase.table("stock").delete().eq("id", stock_id).execute()
+    return JSONResponse({"success": True})
+
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    import os.path
+    ssl_args = {}
+    if os.path.exists("cert.pem") and os.path.exists("key.pem"):
+        ssl_args = {"ssl_certfile": "cert.pem", "ssl_keyfile": "key.pem"}
+    uvicorn.run(app, host="0.0.0.0", port=8000, **ssl_args)
