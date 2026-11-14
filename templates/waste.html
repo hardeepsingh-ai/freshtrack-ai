@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% set active = "waste" %}
+
+{% block content %}
+<div class="header">
+    <h1>Log Waste</h1>
+    <p>Record thrown-away items</p>
+</div>
+
+<div class="card">
+    <div class="form-group">
+        <label>Barcode</label>
+        <input type="text" id="waste-barcode" placeholder="Scan or type barcode" inputmode="numeric">
+    </div>
+    <button class="btn btn-outline" onclick="lookupWaste()" style="margin-bottom:14px;">Look Up Product</button>
+
+    <div id="waste-product" style="display:none;">
+        <div class="product-info" id="waste-product-display"></div>
+    </div>
+
+    <div class="form-group">
+        <label>Product Name</label>
+        <input type="text" id="waste-name" placeholder="Auto-filled from barcode">
+    </div>
+    <div class="form-group">
+        <label>Quantity Wasted</label>
+        <input type="number" id="waste-qty" min="1" value="1">
+    </div>
+    <div class="form-group">
+        <label>Reason</label>
+        <select id="waste-reason">
+            <option value="expired">Expired</option>
+            <option value="damaged">Damaged</option>
+            <option value="unsold">Unsold / quality</option>
+            <option value="recalled">Recalled</option>
+            <option value="other">Other</option>
+        </select>
+    </div>
+    <div class="form-group">
+        <label>Cost Price (£ per item)</label>
+        <input type="number" id="waste-cost" step="0.01" min="0" placeholder="0.00">
+    </div>
+    <button class="btn btn-danger" onclick="logWaste()">Log Waste</button>
+</div>
+
+<div class="card">
+    <h2>Recent Waste</h2>
+    <div id="waste-list">
+        <p style="color:var(--text-muted); text-align:center;">Loading...</p>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function lookupWaste() {
+    const barcode = document.getElementById('waste-barcode').value.trim();
+    if (!barcode) return;
+    try {
+        const resp = await fetch('/api/product/' + barcode);
+        const data = await resp.json();
+        if (data.found) {
+            document.getElementById('waste-name').value = data.name;
+            document.getElementById('waste-product').style.display = 'block';
+            document.getElementById('waste-product-display').innerHTML = `
+                ${data.image ? `<img src="${data.image}" alt="${data.name}">` : ''}
+                <div class="details"><h3>${data.name}</h3><p>${data.brand || ''}</p></div>`;
+        }
+    } catch {}
+}
+
+async function logWaste() {
+    const name = document.getElementById('waste-name').value;
+    if (!name) { showToast('Enter product name'); return; }
+
+    const body = new FormData();
+    body.append('barcode', document.getElementById('waste-barcode').value);
+    body.append('name', name);
+    body.append('quantity', document.getElementById('waste-qty').value);
+    body.append('reason', document.getElementById('waste-reason').value);
+    body.append('cost_price', document.getElementById('waste-cost').value || '0');
+
+    try {
+        const resp = await fetch('/api/waste/log', { method: 'POST', body });
+        const data = await resp.json();
+        if (data.success) {
+            showToast('Waste logged');
+            document.getElementById('waste-name').value = '';
+            document.getElementById('waste-qty').value = 1;
+            document.getElementById('waste-cost').value = '';
+            document.getElementById('waste-product').style.display = 'none';
+        }
+    } catch { showToast('Error logging waste'); }
+}
+</script>
+{% endblock %}

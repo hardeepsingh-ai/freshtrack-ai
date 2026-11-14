@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% set active = "scan" %}
+
+{% block head %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="header">
+    <h1>Scan Barcode</h1>
+    <p>Scan or type a barcode to add stock</p>
+</div>
+
+<div class="card">
+    <div id="scanner-container"></div>
+    <div style="text-align:center; margin: 12px 0;">
+        <button class="btn btn-outline" onclick="toggleScanner()" id="scan-btn" style="width:auto; display:inline-block; padding:10px 24px;">Start Camera</button>
+    </div>
+    <div class="form-group">
+        <label>Or type barcode manually</label>
+        <input type="text" id="barcode-input" placeholder="e.g. 5000128065253" inputmode="numeric" pattern="[0-9]*">
+    </div>
+    <button class="btn btn-primary" onclick="lookupBarcode()">Look Up Product</button>
+</div>
+
+<div class="card" id="product-result" style="display:none;">
+    <div class="product-info" id="product-display"></div>
+    <form id="add-stock-form">
+        <input type="hidden" id="form-barcode">
+        <input type="hidden" id="form-name">
+        <div class="form-group">
+            <label>Product Name</label>
+            <input type="text" id="form-name-display" readonly>
+        </div>
+        <div class="form-group">
+            <label>Quantity</label>
+            <input type="number" id="form-quantity" min="1" value="1" required>
+        </div>
+        <div class="form-group">
+            <label>Expiry Date</label>
+            <input type="date" id="form-expiry" required>
+        </div>
+        <div class="form-group">
+            <label>Cost Price (£ per item)</label>
+            <input type="number" id="form-cost" step="0.01" min="0" placeholder="0.00">
+        </div>
+        <div class="form-group">
+            <label>Sell Price (£ per item)</label>
+            <input type="number" id="form-sell" step="0.01" min="0" placeholder="0.00">
+        </div>
+        <button type="submit" class="btn btn-primary">Add to Stock</button>
+    </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let scanning = false;
+
+function toggleScanner() {
+    if (scanning) {
+        Quagga.stop();
+        document.getElementById('scanner-container').innerHTML = '';
+        document.getElementById('scan-btn').textContent = 'Start Camera';
+        scanning = false;
+    } else {
+        Quagga.init({
+            inputStream: {
+                name: "Live",
+                type: "LiveStream",
+                target: document.getElementById('scanner-container'),
+                constraints: { facingMode: "environment" }
+            },
+            decoder: { readers: ["ean_reader", "ean_8_reader", "upc_reader"] }
+        }, function(err) {
+            if (err) { showToast('Camera not available'); return; }
+            Quagga.start();
+            scanning = true;
+            document.getElementById('scan-btn').textContent = 'Stop Camera';
+        });
+
+        Quagga.onDetected(function(result) {
+            const code = result.codeResult.code;
+            document.getElementById('barcode-input').value = code;
+            Quagga.stop();
+            document.getElementById('scanner-container').innerHTML = '';
+            document.getElementById('scan-btn').textContent = 'Start Camera';
+            scanning = false;
+            showToast('Barcode detected: ' + code);
+            lookupBarcode();
+        });
+    }
+}
+
+async function lookupBarcode() {
+    const barcode = document.getElementById('barcode-input').value.trim();
+    if (!barcode) { showToast('Enter a barcode'); return; }
+
+    const display = document.getElementById('product-display');
+    display.innerHTML = '<div class="loading"><div class="spinner"></div>Looking up...</div>';
+    document.getElementById('product-result').style.display = 'block';
+
+    try {
+        const resp = await fetch('/api/product/' + barcode);
+        const data = await resp.json();
+
+        if (data.found) {
+            display.innerHTML = `
+                ${data.image ? `<img src="${data.image}" alt="${data.name}">` : ''}
+                <div class="details">
+                    <h3>${data.name}</h3>
+                    <p>${data.brand || 'Unknown brand'}</p>
+                </div>`;
+            document.getElementById('form-barcode').value = barcode;
+            document.getElementById('form-name').value = data.name;
+            document.getElementById('form-name-display').value = data.name;
+        } else {
+            display.innerHTML = `<div class="details"><h3>Product not found</h3><p>Type the name below</p></div>`;
+            document.getElementById('form-barcode').value = barcode;
+            document.getElementById('form-name-display').value = '';
+            document.getElementById('form-name-display').readOnly = false;
+            document.getElementById('form-name-display').placeholder = 'Type product name';
+        }
+    } catch {
+        display.innerHTML = '<div class="details"><h3>Lookup failed</h3><p>Type the name manually</p></div>';
+        document.getElementById('form-barcode').value = barcode;
+        document.getElementById('form-name-display').readOnly = false;
+    }
+}
+
+document.getElementById('add-stock-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const name = document.getElementById('form-name').value || document.getElementById('form-name-display').value;
+    if (!name) { showToast('Enter product name'); return; }
+
+    const body = new FormData();
+    body.append('barcode', document.getElementById('form-barcode').value);
+    body.append('name', name);
+    body.append('quantity', document.getElementById('form-quantity').value);
+    body.append('expiry_date', document.getElementById('form-expiry').value);
+    body.append('cost_price', document.getElementById('form-cost').value || '0');
+    body.append('sell_price', document.getElementById('form-sell').value || '0');
+
+    try {
+        const resp = await fetch('/api/stock/add', { method: 'POST', body });
+        const data = await resp.json();
+        if (data.success) {
+            showToast('Stock added!');
+            document.getElementById('form-quantity').value = 1;
+            document.getElementById('form-expiry').value = '';
+            document.getElementById('form-cost').value = '';
+            document.getElementById('form-sell').value = '';
+        } else {
+            showToast('Error adding stock');
+        }
+    } catch {
+        showToast('Error: check database connection');
+    }
+});
+</script>
+{% endblock %}

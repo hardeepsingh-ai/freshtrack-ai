@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% set active = "stock" %}
+
+{% block content %}
+<div class="header">
+    <h1>Stock</h1>
+    <p>Current inventory and shelf counts</p>
+</div>
+
+<div class="card">
+    <h2>Quick Actions</h2>
+    <div style="display:flex; gap:8px;">
+        <a href="/scan" class="btn btn-primary" style="flex:1; font-size:14px;">Add Stock</a>
+        <button class="btn btn-outline" style="flex:1; font-size:14px;" onclick="showShelfCount()">Shelf Count</button>
+        <button class="btn btn-outline" style="flex:1; font-size:14px;" onclick="showSale()">Record Sale</button>
+    </div>
+</div>
+
+<!-- Shelf Count Modal -->
+<div class="card" id="shelf-count-form" style="display:none;">
+    <h2>Shelf Count</h2>
+    <div class="form-group">
+        <label>Barcode</label>
+        <input type="text" id="sc-barcode" placeholder="Scan or type barcode" inputmode="numeric">
+    </div>
+    <div class="form-group">
+        <label>Items on shelf</label>
+        <input type="number" id="sc-count" min="0" placeholder="How many on the shelf?">
+    </div>
+    <button class="btn btn-primary" onclick="submitShelfCount()">Submit Count</button>
+    <div id="sc-result" style="margin-top:12px; font-size:14px;"></div>
+</div>
+
+<!-- Sale Modal -->
+<div class="card" id="sale-form" style="display:none;">
+    <h2>Record Sale</h2>
+    <div class="form-group">
+        <label>Barcode</label>
+        <input type="text" id="sale-barcode" placeholder="Scan or type barcode" inputmode="numeric">
+    </div>
+    <div class="form-group">
+        <label>Quantity sold</label>
+        <input type="number" id="sale-qty" min="1" value="1">
+    </div>
+    <button class="btn btn-primary" onclick="submitSale()">Record Sale</button>
+</div>
+
+<div class="card">
+    <h2>Current Stock</h2>
+    <div id="stock-list">
+        <div class="loading"><div class="spinner"></div>Loading stock...</div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function showShelfCount() {
+    document.getElementById('shelf-count-form').style.display = 'block';
+    document.getElementById('sale-form').style.display = 'none';
+}
+function showSale() {
+    document.getElementById('sale-form').style.display = 'block';
+    document.getElementById('shelf-count-form').style.display = 'none';
+}
+
+async function submitShelfCount() {
+    const body = new FormData();
+    body.append('barcode', document.getElementById('sc-barcode').value);
+    body.append('counted', document.getElementById('sc-count').value);
+    try {
+        const resp = await fetch('/api/stock/shelf-count', { method: 'POST', body });
+        const data = await resp.json();
+        const el = document.getElementById('sc-result');
+        if (data.discrepancy > 0) {
+            el.innerHTML = `<span style="color:var(--danger)">Discrepancy: ${data.discrepancy} items missing (system had ${data.system_count}, shelf has ${data.shelf_count})</span>`;
+        } else {
+            el.innerHTML = `<span style="color:var(--accent)">Matches! ${data.shelf_count} items on shelf.</span>`;
+        }
+        loadStock();
+    } catch { showToast('Error submitting count'); }
+}
+
+async function submitSale() {
+    const body = new FormData();
+    body.append('barcode', document.getElementById('sale-barcode').value);
+    body.append('quantity', document.getElementById('sale-qty').value);
+    try {
+        const resp = await fetch('/api/stock/sold', { method: 'POST', body });
+        const data = await resp.json();
+        showToast(`Recorded: ${data.sold} sold`);
+        loadStock();
+    } catch { showToast('Error recording sale'); }
+}
+
+async function loadStock() {
+    try {
+        const resp = await fetch('/api/stock/current');
+        const data = await resp.json();
+        const el = document.getElementById('stock-list');
+
+        if (!data.stock?.length) {
+            el.innerHTML = '<p style="color:var(--text-muted); text-align:center; padding:20px;">No stock yet. Scan items to add.</p>';
+            return;
+        }
+
+        const grouped = {};
+        data.stock.forEach(s => {
+            if (!grouped[s.barcode]) grouped[s.barcode] = { name: s.name, batches: [] };
+            grouped[s.barcode].batches.push(s);
+        });
+
+        el.innerHTML = Object.entries(grouped).map(([barcode, info]) => {
+            const total = info.batches.reduce((a, b) => a + b.quantity, 0);
+            const earliest = info.batches[0].expiry_date;
+            const days = Math.ceil((new Date(earliest) - new Date()) / 86400000);
+            const color = days <= 1 ? 'var(--danger)' : days <= 3 ? 'var(--warning)' : 'var(--text)';
+
+            return `<div style="padding:12px 0; border-bottom:1px solid var(--border);">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <div>
+                        <strong>${info.name}</strong>
+                        <div style="font-size:12px; color:var(--text-muted);">${barcode} &middot; ${info.batches.length} batch${info.batches.length > 1 ? 'es' : ''}</div>
+                    </div>
+                    <div style="text-align:right;">
+                        <div style="font-size:18px; font-weight:700;">${total}</div>
+                        <div style="font-size:11px; color:${color};">exp ${earliest}</div>
+                    </div>
+                </div>
+            </div>`;
+        }).join('');
+    } catch {
+        document.getElementById('stock-list').innerHTML = '<p style="color:var(--text-muted); text-align:center;">Connect database to see stock</p>';
+    }
+}
+loadStock();
+</script>
+{% endblock %}

@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% set active = "dashboard" %}
+
+{% block head %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="header">
+    <h1>Owner Dashboard</h1>
+    <p>Waste analytics & AI insights</p>
+</div>
+
+<div class="stats" id="dash-stats">
+    <div class="stat">
+        <div class="number" id="d-stock">-</div>
+        <div class="label">Total Stock</div>
+    </div>
+    <div class="stat danger">
+        <div class="number" id="d-expiring">-</div>
+        <div class="label">Expiring Soon</div>
+    </div>
+    <div class="stat warning">
+        <div class="number" id="d-waste">-</div>
+        <div class="label">Waste Cost (7d)</div>
+    </div>
+    <div class="stat">
+        <div class="number" id="d-products">-</div>
+        <div class="label">Products</div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>Waste Trend (30 days)</h2>
+    <div class="chart-container">
+        <canvas id="waste-chart"></canvas>
+    </div>
+</div>
+
+<div class="card">
+    <h2>Top Wasted Items</h2>
+    <div class="chart-container">
+        <canvas id="top-waste-chart"></canvas>
+    </div>
+</div>
+
+<div class="insights-box" id="ai-insights">
+    <h3>AI Insights</h3>
+    <div id="insights-content">
+        <div class="loading"><div class="spinner"></div>Analysing your data...</div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadDashboard() {
+    try {
+        const [statsRes, trendRes, topRes] = await Promise.all([
+            fetch('/api/dashboard/stats'),
+            fetch('/api/dashboard/waste-trend'),
+            fetch('/api/dashboard/top-wasted'),
+        ]);
+        const stats = await statsRes.json();
+        const trend = await trendRes.json();
+        const top = await topRes.json();
+
+        document.getElementById('d-stock').textContent = stats.total_stock || 0;
+        document.getElementById('d-expiring').textContent = stats.expiring_soon || 0;
+        document.getElementById('d-waste').textContent = '£' + (stats.waste_this_week?.cost || 0).toFixed(2);
+        document.getElementById('d-products').textContent = stats.unique_products || 0;
+
+        // Waste trend chart
+        if (trend.trend?.length) {
+            new Chart(document.getElementById('waste-chart'), {
+                type: 'line',
+                data: {
+                    labels: trend.trend.map(t => t.date.slice(5)),
+                    datasets: [{
+                        label: 'Daily Waste (£)',
+                        data: trend.trend.map(t => t.cost),
+                        borderColor: '#ef4444',
+                        backgroundColor: 'rgba(239,68,68,0.1)',
+                        fill: true,
+                        tension: 0.3,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: { y: { beginAtZero: true, ticks: { callback: v => '£' + v } } }
+                }
+            });
+        }
+
+        // Top wasted chart
+        if (top.top_wasted?.length) {
+            new Chart(document.getElementById('top-waste-chart'), {
+                type: 'bar',
+                data: {
+                    labels: top.top_wasted.map(t => t.name.slice(0, 15)),
+                    datasets: [{
+                        label: 'Waste Cost (£)',
+                        data: top.top_wasted.map(t => t.cost),
+                        backgroundColor: '#f59e0b',
+                        borderRadius: 6,
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: { x: { beginAtZero: true, ticks: { callback: v => '£' + v } } }
+                }
+            });
+        }
+    } catch {
+        document.getElementById('d-stock').textContent = '0';
+        document.getElementById('d-expiring').textContent = '0';
+        document.getElementById('d-waste').textContent = '£0';
+        document.getElementById('d-products').textContent = '0';
+    }
+
+    // AI Insights
+    try {
+        const resp = await fetch('/api/ai/insights');
+        const data = await resp.json();
+        document.getElementById('insights-content').textContent = data.insights;
+    } catch {
+        document.getElementById('insights-content').textContent = 'AI insights unavailable. Add GROQ_API_KEY to enable.';
+    }
+}
+loadDashboard();
+</script>
+{% endblock %}
