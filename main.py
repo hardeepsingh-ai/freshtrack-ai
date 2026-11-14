@@ -55,28 +55,100 @@ async def dashboard_page(request: Request):
 
 @app.get("/api/product/{barcode}")
 async def lookup_product(barcode: str):
-    """Look up product info from Open Food Facts by barcode."""
+    """Look up product info from multiple databases: Open Food Facts, Open Beauty Facts, UPCitemdb."""
     async with httpx.AsyncClient() as client:
-        resp = await client.get(
-            f"https://world.openfoodfacts.org/api/v2/product/{barcode}.json",
-            timeout=10,
-        )
-    if resp.status_code != 200:
-        return JSONResponse({"found": False, "barcode": barcode})
+        # 1. Try Open Food Facts (food & drink)
+        try:
+            resp = await client.get(
+                f"https://world.openfoodfacts.org/api/v2/product/{barcode}.json",
+                timeout=8,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("status") == 1:
+                    product = data["product"]
+                    name = product.get("product_name", "").strip()
+                    if name:
+                        return JSONResponse({
+                            "found": True, "barcode": barcode,
+                            "name": name,
+                            "brand": product.get("brands", ""),
+                            "category": (product.get("categories_tags", ["other"])[0]
+                                         if product.get("categories_tags") else "other"),
+                            "image": product.get("image_front_small_url", ""),
+                        })
+        except Exception:
+            pass
 
-    data = resp.json()
-    if data.get("status") != 1:
-        return JSONResponse({"found": False, "barcode": barcode})
+        # 2. Try Open Beauty Facts (cosmetics, hair, skincare)
+        try:
+            resp = await client.get(
+                f"https://world.openbeautyfacts.org/api/v2/product/{barcode}.json",
+                timeout=8,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("status") == 1:
+                    product = data["product"]
+                    name = product.get("product_name", "").strip()
+                    if name:
+                        return JSONResponse({
+                            "found": True, "barcode": barcode,
+                            "name": name,
+                            "brand": product.get("brands", ""),
+                            "category": "beauty",
+                            "image": product.get("image_front_small_url", ""),
+                        })
+        except Exception:
+            pass
 
-    product = data["product"]
-    return JSONResponse({
-        "found": True,
-        "barcode": barcode,
-        "name": product.get("product_name", "Unknown"),
-        "brand": product.get("brands", ""),
-        "category": product.get("categories_tags", ["other"])[0] if product.get("categories_tags") else "other",
-        "image": product.get("image_front_small_url", ""),
-    })
+        # 3. Try Open Pet Food Facts (pet products)
+        try:
+            resp = await client.get(
+                f"https://world.openpetfoodfacts.org/api/v2/product/{barcode}.json",
+                timeout=8,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("status") == 1:
+                    product = data["product"]
+                    name = product.get("product_name", "").strip()
+                    if name:
+                        return JSONResponse({
+                            "found": True, "barcode": barcode,
+                            "name": name,
+                            "brand": product.get("brands", ""),
+                            "category": "pet",
+                            "image": product.get("image_front_small_url", ""),
+                        })
+        except Exception:
+            pass
+
+        # 4. Try UPCitemdb (general products — electronics, household, etc.)
+        try:
+            resp = await client.get(
+                f"https://api.upcitemdb.com/prod/trial/lookup?upc={barcode}",
+                timeout=8,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                items = data.get("items", [])
+                if items:
+                    item = items[0]
+                    name = item.get("title", "").strip()
+                    if name:
+                        images = item.get("images", [])
+                        return JSONResponse({
+                            "found": True, "barcode": barcode,
+                            "name": name,
+                            "brand": item.get("brand", ""),
+                            "category": item.get("category", "other"),
+                            "image": images[0] if images else "",
+                        })
+        except Exception:
+            pass
+
+    return JSONResponse({"found": False, "barcode": barcode})
 
 
 # ---------- API: Stock ----------
