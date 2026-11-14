@@ -461,8 +461,13 @@ async def delete_stock(stock_id: int):
 
 if __name__ == "__main__":
     import uvicorn
-    import os.path
-    ssl_args = {}
-    if os.path.exists("cert.pem") and os.path.exists("key.pem"):
-        ssl_args = {"ssl_certfile": "cert.pem", "ssl_keyfile": "key.pem"}
-    uvicorn.run(app, host="0.0.0.0", port=8000, **ssl_args)
+    try:
+        from pyngrok import ngrok
+        tunnel = ngrok.connect(8000)
+        print(f"\n{'='*50}")
+        print(f"Open this on your phone:")
+        print(f"{tunnel.public_url}")
+        print(f"{'='*50}\n")
+    except Exception as e:
+        print(f"ngrok not available ({e}), use http://localhost:8000")
+    uvicorn.run(app, host="0.0.0.0", port=8000)
