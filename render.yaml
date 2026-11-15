@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: freshtrack-ai
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn main:app -w 2 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: SUPABASE_URL
+        fromDatabase: false
+      - key: SUPABASE_KEY
+        fromDatabase: false
+      - key: GROQ_API_KEY
+        fromDatabase: false
