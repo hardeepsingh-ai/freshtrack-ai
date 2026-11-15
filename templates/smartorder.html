@@ -1,0 +1,568 @@
+{% extends "base.html" %}
+{% set active = "smartorder" %}
+
+{% block head %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+    .so-page { padding: 0 16px 120px; max-width: 800px; margin: 0 auto; }
+
+    .so-header { text-align: center; padding: 16px 0 8px; }
+    .so-header h1 { font-size: 20px; margin: 0; }
+    .so-header p { color: var(--text-muted, #888); font-size: 13px; margin-top: 4px; }
+    .ai-badge {
+        display: inline-flex; align-items: center; gap: 6px;
+        background: linear-gradient(135deg, #7c3aed, #6d28d9);
+        color: #fff; padding: 5px 14px; border-radius: 20px;
+        font-size: 12px; font-weight: 600; margin-top: 8px;
+    }
+    .ai-badge .pulse { width: 8px; height: 8px; background: #a78bfa; border-radius: 50%; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+    /* Date range picker */
+    .date-bar {
+        display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+        background: var(--surface-1, #f5f5f0); border-radius: 12px;
+        padding: 10px 14px; margin: 12px 0;
+    }
+    .date-bar label { font-size: 12px; color: var(--text-muted, #888); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+    .date-bar input[type="date"] {
+        border: 1px solid var(--border, #ddd); border-radius: 8px; padding: 6px 10px;
+        font-size: 13px; background: var(--bg, #fff); color: var(--text-primary, #1a1a1a);
+    }
+    .quick-btns { display: flex; gap: 4px; margin-left: auto; }
+    .quick-btn {
+        padding: 5px 10px; border-radius: 8px; border: 1px solid var(--border, #ddd);
+        background: var(--bg, #fff); font-size: 11px; cursor: pointer; font-weight: 500;
+        color: var(--text-primary, #1a1a1a); transition: all 0.15s;
+    }
+    .quick-btn.active, .quick-btn:hover { background: #7c3aed; color: #fff; border-color: #7c3aed; }
+
+    /* Stats row */
+    .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 12px 0; }
+    .stat-card { background: var(--surface-1, #f5f5f0); border-radius: 12px; padding: 12px; text-align: center; }
+    .stat-card .num { font-size: 22px; font-weight: 700; color: var(--text-primary, #1a1a1a); }
+    .stat-card .label { font-size: 10px; color: var(--text-muted, #888); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
+
+    /* Chart */
+    .chart-card { background: var(--surface-1, #f5f5f0); border-radius: 14px; padding: 16px; margin: 12px 0; }
+    .chart-card h3 { font-size: 14px; font-weight: 600; margin: 0 0 10px; }
+
+    /* Category tabs */
+    .cat-tabs { display: flex; gap: 4px; overflow-x: auto; padding: 4px 0; margin: 12px 0 0; -webkit-overflow-scrolling: touch; }
+    .cat-tab {
+        white-space: nowrap; padding: 7px 14px; border-radius: 20px; font-size: 12px; font-weight: 500;
+        cursor: pointer; border: 1px solid var(--border, #ddd); background: var(--bg, #fff);
+        color: var(--text-primary, #1a1a1a); transition: all 0.15s;
+    }
+    .cat-tab.active { background: #7c3aed; color: #fff; border-color: #7c3aed; }
+    .cat-tab .count { margin-left: 4px; opacity: 0.7; }
+
+    /* Table */
+    .table-wrap { overflow-x: auto; margin: 8px 0; }
+    .order-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .order-table th {
+        text-align: left; padding: 10px 8px; font-size: 11px;
+        color: var(--text-muted, #888); text-transform: uppercase;
+        letter-spacing: 0.5px; border-bottom: 2px solid var(--border, #e5e5e0);
+        white-space: nowrap; cursor: pointer; user-select: none;
+    }
+    .order-table th:hover { color: var(--text-primary, #1a1a1a); }
+    .order-table th .arrow { font-size: 9px; margin-left: 2px; }
+    .order-table td { padding: 10px 8px; border-bottom: 1px solid var(--border, #e5e5e0); }
+    .order-table tr:last-child td { border-bottom: none; }
+
+    .trend-chip {
+        display: inline-block; font-size: 10px; padding: 2px 8px; border-radius: 10px; font-weight: 500;
+    }
+    .trend-chip.steady { background: #dbeafe; color: #1e40af; }
+    .trend-chip.trending_up { background: #dcfce7; color: #166534; }
+    .trend-chip.trending_down { background: #fee2e2; color: #991b1b; }
+    .trend-chip.weekend_heavy { background: #fef3c7; color: #92400e; }
+    .trend-chip.regular_buyer { background: #f3e8ff; color: #6b21a8; }
+    .trend-chip.seasonal { background: #e0f2fe; color: #075985; }
+
+    .conf-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
+    .conf-dot.high { background: #22c55e; }
+    .conf-dot.medium { background: #f59e0b; }
+    .conf-dot.low { background: #ef4444; }
+
+    .order-qty { font-weight: 700; font-size: 16px; }
+    .order-qty.zero { color: var(--text-muted, #888); }
+    .order-qty.needed { color: #22c55e; }
+
+    .mini-bars { display: flex; align-items: flex-end; gap: 2px; height: 28px; }
+    .mini-bar { flex: 1; background: #7c3aed; border-radius: 2px; min-height: 3px; opacity: 0.3; }
+    .mini-bar:last-child { opacity: 1; }
+
+    .reasoning { font-size: 11px; color: var(--text-muted, #888); font-style: italic; max-width: 220px; }
+
+    .product-row { cursor: pointer; transition: background 0.15s; }
+    .product-row:hover { background: rgba(124,58,237,0.04); }
+    .product-detail { display: none; }
+    .product-row.expanded + .product-detail { display: table-row; }
+
+    /* Buttons */
+    .btn-generate {
+        display: block; width: 100%; padding: 14px;
+        background: linear-gradient(135deg, #7c3aed, #6d28d9);
+        color: #fff; border: none; border-radius: 12px;
+        font-size: 15px; font-weight: 600; cursor: pointer;
+        margin: 16px 0; transition: transform 0.1s;
+    }
+    .btn-generate:active { transform: scale(0.98); }
+    .btn-generate:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .total-order {
+        background: linear-gradient(135deg, #f0fdf4, #dcfce7);
+        border: 1px solid #bbf7d0; border-radius: 12px;
+        padding: 16px; text-align: center; margin: 16px 0;
+    }
+    .total-order h3 { color: #166534; font-size: 18px; margin: 0; }
+    .total-order p { color: #15803d; font-size: 13px; margin-top: 4px; }
+
+    .loading-brain { text-align: center; padding: 40px 20px; }
+    .loading-brain .brain-icon { font-size: 48px; animation: float 2s ease-in-out infinite; }
+    @keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-8px)} }
+    .loading-brain p { color: var(--text-muted, #888); font-size: 14px; margin-top: 12px; }
+
+    /* Category summary cards */
+    .cat-summary { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; margin: 12px 0; }
+    .cat-summary-card {
+        background: var(--surface-1, #f5f5f0); border-radius: 12px; padding: 12px;
+        cursor: pointer; transition: all 0.15s; border: 2px solid transparent;
+    }
+    .cat-summary-card:hover, .cat-summary-card.active { border-color: #7c3aed; }
+    .cat-summary-card h4 { font-size: 13px; margin: 0; font-weight: 600; }
+    .cat-summary-card .cat-stats { display: flex; justify-content: space-between; margin-top: 6px; font-size: 12px; color: var(--text-muted, #888); }
+    .cat-summary-card .cat-rev { font-weight: 700; color: #22c55e; font-size: 14px; margin-top: 4px; }
+
+    /* Export button */
+    .btn-export {
+        display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px;
+        border-radius: 10px; border: 1px solid var(--border, #ddd);
+        background: var(--bg, #fff); font-size: 12px; font-weight: 500;
+        cursor: pointer; color: var(--text-primary, #1a1a1a);
+    }
+
+    @media (max-width: 600px) {
+        .stats-row { grid-template-columns: repeat(2, 1fr); }
+        .date-bar { flex-direction: column; align-items: stretch; }
+        .quick-btns { margin-left: 0; justify-content: center; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="so-page">
+    <div class="so-header">
+        <h1>Smart Order</h1>
+        <p>AI predicts what to order — backed by real sales data</p>
+        <div class="ai-badge"><span class="pulse"></span> FreshTrack AI Brain</div>
+    </div>
+
+    <!-- Date range picker -->
+    <div class="date-bar">
+        <div>
+            <label>From</label><br>
+            <input type="date" id="date-start">
+        </div>
+        <div>
+            <label>To</label><br>
+            <input type="date" id="date-end">
+        </div>
+        <div class="quick-btns">
+            <button class="quick-btn active" data-days="28">4 Weeks</button>
+            <button class="quick-btn" data-days="14">2 Weeks</button>
+            <button class="quick-btn" data-days="7">1 Week</button>
+        </div>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats-row" id="stats-row" style="display:none;">
+        <div class="stat-card">
+            <div class="num" id="stat-products">-</div>
+            <div class="label">Products</div>
+        </div>
+        <div class="stat-card">
+            <div class="num" id="stat-sales">-</div>
+            <div class="label">Items sold</div>
+        </div>
+        <div class="stat-card">
+            <div class="num" id="stat-revenue">-</div>
+            <div class="label">Revenue</div>
+        </div>
+        <div class="stat-card">
+            <div class="num" id="stat-patterns">-</div>
+            <div class="label">Patterns</div>
+        </div>
+    </div>
+
+    <!-- Chart -->
+    <div class="chart-card" id="chart-section" style="display:none;">
+        <h3>Daily sales volume</h3>
+        <canvas id="sales-chart" height="160"></canvas>
+    </div>
+
+    <!-- Category summary -->
+    <div id="cat-section" style="display:none;">
+        <h3 style="font-size:14px; font-weight:600; margin:16px 0 8px;">Sales by Category</h3>
+        <div class="cat-summary" id="cat-summary"></div>
+    </div>
+
+    <!-- Generate button -->
+    <button class="btn-generate" onclick="generatePredictions()" id="gen-btn">
+        Generate Smart Order for Next Week
+    </button>
+
+    <!-- Loading -->
+    <div id="loading" style="display:none;">
+        <div class="loading-brain">
+            <div class="brain-icon">🧠</div>
+            <p>AI is analysing your sales data...</p>
+            <p style="font-size:12px; color:#aaa;">Looking for patterns, trends, and regular buyers</p>
+        </div>
+    </div>
+
+    <!-- Results -->
+    <div id="results" style="display:none;">
+        <div class="total-order" id="total-order"></div>
+
+        <!-- Category filter tabs -->
+        <div class="cat-tabs" id="cat-tabs"></div>
+
+        <!-- Sort & export row -->
+        <div style="display:flex; justify-content:space-between; align-items:center; margin:8px 0;">
+            <div style="font-size:12px; color:var(--text-muted,#888);" id="result-count"></div>
+            <button class="btn-export" onclick="exportCSV()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                Export CSV
+            </button>
+        </div>
+
+        <div class="table-wrap">
+            <table class="order-table">
+                <thead>
+                    <tr>
+                        <th onclick="sortTable('name')">Product <span class="arrow"></span></th>
+                        <th onclick="sortTable('sold')" style="text-align:center;">Sold <span class="arrow"></span></th>
+                        <th onclick="sortTable('current_stock')" style="text-align:center;">Stock <span class="arrow"></span></th>
+                        <th>Trend</th>
+                        <th onclick="sortTable('predicted_demand')" style="text-align:center;">Predicted <span class="arrow"></span></th>
+                        <th onclick="sortTable('order_qty')" style="text-align:center;">Order <span class="arrow"></span></th>
+                    </tr>
+                </thead>
+                <tbody id="order-body"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let chartInstance = null;
+let allPredictions = [];
+let currentSort = {key: 'order_qty', dir: -1};
+let currentCategory = 'all';
+
+// Set default dates
+(function() {
+    const now = new Date();
+    const ago = new Date(now);
+    ago.setDate(ago.getDate() - 28);
+    document.getElementById('date-end').value = now.toISOString().slice(0, 10);
+    document.getElementById('date-start').value = ago.toISOString().slice(0, 10);
+})();
+
+// Quick buttons
+document.querySelectorAll('.quick-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+        document.querySelectorAll('.quick-btn').forEach(b => b.classList.remove('active'));
+        this.classList.add('active');
+        const days = parseInt(this.dataset.days);
+        const now = new Date();
+        const ago = new Date(now);
+        ago.setDate(ago.getDate() - days);
+        document.getElementById('date-end').value = now.toISOString().slice(0, 10);
+        document.getElementById('date-start').value = ago.toISOString().slice(0, 10);
+        loadChart();
+        loadCategories();
+    });
+});
+
+// Date change
+document.getElementById('date-start').addEventListener('change', () => { document.querySelectorAll('.quick-btn').forEach(b => b.classList.remove('active')); loadChart(); loadCategories(); });
+document.getElementById('date-end').addEventListener('change', () => { document.querySelectorAll('.quick-btn').forEach(b => b.classList.remove('active')); loadChart(); loadCategories(); });
+
+function getDateParams() {
+    const s = document.getElementById('date-start').value;
+    const e = document.getElementById('date-end').value;
+    return (s && e) ? `start=${s}&end=${e}` : '';
+}
+
+// Load chart on page load
+async function loadChart() {
+    try {
+        const resp = await fetch('/api/ai/sales-summary?' + getDateParams());
+        const data = await resp.json();
+        if (data.daily_sales && data.daily_sales.length > 0) {
+            document.getElementById('chart-section').style.display = 'block';
+            const ctx = document.getElementById('sales-chart').getContext('2d');
+            if (chartInstance) chartInstance.destroy();
+            const labels = data.daily_sales.map(d => {
+                const dt = new Date(d.date);
+                return dt.toLocaleDateString('en-GB', {day:'numeric', month:'short'});
+            });
+            chartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Items sold',
+                        data: data.daily_sales.map(d => d.qty),
+                        backgroundColor: 'rgba(124, 58, 237, 0.6)',
+                        borderRadius: 4,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.05)' } },
+                        x: { grid: { display: false }, ticks: { maxRotation: 45, font: { size: 10 } } }
+                    }
+                }
+            });
+
+            const totalSales = data.daily_sales.reduce((a, b) => a + b.qty, 0);
+            document.getElementById('stat-sales').textContent = totalSales.toLocaleString();
+            document.getElementById('stats-row').style.display = 'grid';
+        }
+    } catch {}
+}
+
+// Load category summary
+async function loadCategories() {
+    try {
+        const resp = await fetch('/api/ai/category-sales?' + getDateParams());
+        const data = await resp.json();
+        if (data.categories) {
+            const section = document.getElementById('cat-section');
+            const container = document.getElementById('cat-summary');
+            section.style.display = 'block';
+            container.innerHTML = '';
+
+            let totalRev = 0;
+            for (const [name, cat] of Object.entries(data.categories)) {
+                totalRev += cat.total_revenue;
+                const card = document.createElement('div');
+                card.className = 'cat-summary-card';
+                card.innerHTML = `
+                    <h4>${name}</h4>
+                    <div class="cat-stats">
+                        <span>${cat.total_sold} sold</span>
+                        <span>${cat.products.length} items</span>
+                    </div>
+                    <div class="cat-rev">£${cat.total_revenue.toLocaleString()}</div>
+                `;
+                container.appendChild(card);
+            }
+            document.getElementById('stat-revenue').textContent = '£' + Math.round(totalRev).toLocaleString();
+        }
+    } catch {}
+}
+
+loadChart();
+loadCategories();
+
+// Generate AI predictions
+async function generatePredictions() {
+    const btn = document.getElementById('gen-btn');
+    btn.disabled = true;
+    btn.textContent = 'Analysing...';
+    document.getElementById('loading').style.display = 'block';
+    document.getElementById('results').style.display = 'none';
+
+    try {
+        const resp = await fetch('/api/ai/smart-order?' + getDateParams());
+        const data = await resp.json();
+
+        if (data.error) {
+            alert(data.error);
+            btn.disabled = false;
+            btn.textContent = 'Generate Smart Order for Next Week';
+            document.getElementById('loading').style.display = 'none';
+            return;
+        }
+
+        allPredictions = data.predictions;
+
+        // Calculate total sold per product
+        allPredictions.forEach(p => {
+            p.sold = (p.week1||0) + (p.week2||0) + (p.week3||0) + (p.week4||0);
+        });
+
+        renderCategoryTabs();
+        renderPredictions();
+    } catch (e) {
+        alert('Error getting predictions: ' + e.message);
+    }
+
+    document.getElementById('loading').style.display = 'none';
+    btn.disabled = false;
+    btn.textContent = 'Regenerate Predictions';
+}
+
+// Assign categories based on product name
+function getCategory(name) {
+    const n = name.toLowerCase();
+    if (/lager|vodka|buckfast|wine|beer|cider|whisky|gin|rum|ale/.test(n)) return 'Alcohol';
+    if (/monster|red bull|prime|energy/.test(n)) return 'Energy Drinks';
+    if (/cola|coke|fanta|pepsi|irn.bru|juice|water|lucozade/.test(n)) return 'Soft Drinks';
+    if (/walker|doritos|quaver|crisp|pringles|snack/.test(n)) return 'Crisps & Snacks';
+    if (/milk|cravendale|graham/.test(n)) return 'Dairy';
+    if (/bread|warburton|toast/.test(n)) return 'Bread';
+    if (/elf.bar|vape|puff/.test(n)) return 'Vapes';
+    return 'Other';
+}
+
+function renderCategoryTabs() {
+    const tabs = document.getElementById('cat-tabs');
+    tabs.innerHTML = '';
+    const cats = {};
+    allPredictions.forEach(p => {
+        const c = getCategory(p.name);
+        cats[c] = (cats[c] || 0) + 1;
+    });
+
+    const allTab = document.createElement('div');
+    allTab.className = 'cat-tab active';
+    allTab.textContent = 'All (' + allPredictions.length + ')';
+    allTab.onclick = () => { currentCategory = 'all'; setActiveTab(allTab); renderPredictions(); };
+    tabs.appendChild(allTab);
+
+    for (const [cat, count] of Object.entries(cats).sort((a,b) => b[1]-a[1])) {
+        const tab = document.createElement('div');
+        tab.className = 'cat-tab';
+        tab.innerHTML = cat + '<span class="count">' + count + '</span>';
+        tab.onclick = () => { currentCategory = cat; setActiveTab(tab); renderPredictions(); };
+        tabs.appendChild(tab);
+    }
+}
+
+function setActiveTab(activeTab) {
+    document.querySelectorAll('.cat-tab').forEach(t => t.classList.remove('active'));
+    activeTab.classList.add('active');
+}
+
+function sortTable(key) {
+    if (currentSort.key === key) {
+        currentSort.dir *= -1;
+    } else {
+        currentSort = {key, dir: -1};
+    }
+    renderPredictions();
+}
+
+function renderPredictions() {
+    let filtered = currentCategory === 'all'
+        ? [...allPredictions]
+        : allPredictions.filter(p => getCategory(p.name) === currentCategory);
+
+    filtered.sort((a, b) => {
+        const va = a[currentSort.key] || 0;
+        const vb = b[currentSort.key] || 0;
+        if (typeof va === 'string') return va.localeCompare(vb) * currentSort.dir;
+        return (va - vb) * currentSort.dir;
+    });
+
+    const body = document.getElementById('order-body');
+    body.innerHTML = '';
+
+    let totalOrder = 0;
+    let patternsFound = new Set();
+
+    filtered.forEach(p => {
+        patternsFound.add(p.pattern);
+        totalOrder += (p.order_qty || 0);
+
+        const weeks = [p.week1||0, p.week2||0, p.week3||0, p.week4||0];
+        const maxWeek = Math.max(...weeks, 1);
+        const orderClass = (p.order_qty||0) > 0 ? 'needed' : 'zero';
+
+        const tr = document.createElement('tr');
+        tr.className = 'product-row';
+        tr.onclick = function() { this.classList.toggle('expanded'); };
+        tr.innerHTML = `
+            <td>
+                <div style="font-weight:600; font-size:13px;">${p.name}</div>
+                <span class="trend-chip ${p.pattern}">${formatPattern(p.pattern)}</span>
+            </td>
+            <td style="text-align:center; font-weight:600;">${p.sold || 0}</td>
+            <td style="text-align:center;">${p.current_stock || 0}</td>
+            <td>
+                <div class="mini-bars">
+                    ${weeks.map(w => '<div class="mini-bar" style="height:' + Math.max(8, (w/maxWeek)*100) + '%"></div>').join('')}
+                </div>
+                <div style="font-size:9px; color:#aaa;">W1 W2 W3 W4</div>
+            </td>
+            <td style="text-align:center;">
+                <div style="font-weight:600;">${p.predicted_demand || 0}</div>
+                <div style="font-size:10px;"><span class="conf-dot ${p.confidence}"></span>${p.confidence}</div>
+            </td>
+            <td style="text-align:center;">
+                <span class="order-qty ${orderClass}">${p.order_qty || 0}</span>
+            </td>
+        `;
+        body.appendChild(tr);
+
+        const detail = document.createElement('tr');
+        detail.className = 'product-detail';
+        detail.innerHTML = `
+            <td colspan="6" style="padding:8px 12px; background:rgba(124,58,237,0.04);">
+                <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:8px; font-size:12px; margin-bottom:6px;">
+                    <div><span style="color:#888;">Week 1:</span> ${p.week1||0}</div>
+                    <div><span style="color:#888;">Week 2:</span> ${p.week2||0}</div>
+                    <div><span style="color:#888;">Week 3:</span> ${p.week3||0}</div>
+                    <div><span style="color:#888;">Week 4:</span> ${p.week4||0}</div>
+                </div>
+                ${(p.wasted||0)>0 ? '<div style="font-size:12px; color:#ef4444;">Wasted: '+p.wasted+'</div>' : ''}
+                <div class="reasoning">"${p.reasoning || ''}"</div>
+            </td>
+        `;
+        body.appendChild(detail);
+    });
+
+    document.getElementById('stat-products').textContent = allPredictions.length;
+    document.getElementById('stat-patterns').textContent = patternsFound.size;
+    document.getElementById('stats-row').style.display = 'grid';
+
+    const itemsToOrder = filtered.filter(p => (p.order_qty||0) > 0).length;
+    document.getElementById('total-order').innerHTML = `
+        <h3>${totalOrder} units to order across ${itemsToOrder} products</h3>
+        <p>Based on sales data in selected date range · AI confidence weighted</p>
+    `;
+    document.getElementById('result-count').textContent = filtered.length + ' products shown';
+    document.getElementById('results').style.display = 'block';
+}
+
+function formatPattern(p) {
+    return {'steady':'Steady','trending_up':'Trending Up','trending_down':'Trending Down',
+        'weekend_heavy':'Weekend Heavy','regular_buyer':'Regular Buyer','seasonal':'Seasonal'}[p] || p;
+}
+
+function exportCSV() {
+    const filtered = currentCategory === 'all' ? allPredictions
+        : allPredictions.filter(p => getCategory(p.name) === currentCategory);
+    let csv = 'Product,Category,Week1,Week2,Week3,Week4,Total Sold,Current Stock,Predicted Demand,Order Qty,Pattern,Confidence,Reasoning\n';
+    filtered.forEach(p => {
+        csv += `"${p.name}","${getCategory(p.name)}",${p.week1||0},${p.week2||0},${p.week3||0},${p.week4||0},${p.sold||0},${p.current_stock||0},${p.predicted_demand||0},${p.order_qty||0},"${p.pattern}","${p.confidence}","${(p.reasoning||'').replace(/"/g,"'")}"\n`;
+    });
+    const blob = new Blob([csv], {type: 'text/csv'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'smart-order-' + new Date().toISOString().slice(0,10) + '.csv';
+    a.click();
+}
+</script>
+{% endblock %}

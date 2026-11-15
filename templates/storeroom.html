@@ -1,0 +1,611 @@
+{% extends "base.html" %}
+{% set active = "storeroom" %}
+
+{% block head %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
+<style>
+    .locate-card {
+        background: var(--card);
+        border-radius: 14px;
+        padding: 16px;
+        margin: 12px 16px;
+        box-shadow: var(--shadow);
+    }
+    .locate-row {
+        display: flex;
+        gap: 8px;
+    }
+    .locate-row input { flex: 1; }
+    .locate-row .btn { flex: 0 0 auto; width: auto; padding: 12px 20px; }
+
+    /* Floor Plan */
+    .map-card {
+        background: var(--card);
+        border-radius: 14px;
+        padding: 16px;
+        margin: 12px 16px;
+        box-shadow: var(--shadow);
+    }
+    .map-card h2 {
+        font-size: 15px;
+        margin-bottom: 12px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .floor-plan {
+        position: relative;
+        width: 100%;
+        aspect-ratio: 3/4;
+        background: #f8faf8;
+        border-radius: 4px;
+        border: 3px solid #475569;
+        overflow: hidden;
+    }
+    /* Walls */
+    .wall-left { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: #475569; }
+    .wall-right { position: absolute; right: 0; top: 0; bottom: 0; width: 3px; background: #475569; }
+    .wall-bottom { position: absolute; bottom: 0; left: 0; right: 0; height: 3px; background: #475569; }
+    /* Door */
+    .door {
+        position: absolute;
+        top: -3px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 70px;
+        height: 16px;
+        background: #854d0e;
+        border-radius: 0 0 6px 6px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #fef3c7;
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 2px;
+        z-index: 5;
+    }
+    .door::before {
+        content: '';
+        position: absolute;
+        top: -2px;
+        left: -8px;
+        right: -8px;
+        height: 3px;
+        background: #f8faf8;
+    }
+    /* Arrow showing entry direction */
+    .entry-arrow {
+        position: absolute;
+        top: 18px;
+        left: 50%;
+        transform: translateX(-50%);
+        color: #94a3b8;
+        font-size: 11px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0;
+        z-index: 5;
+    }
+    .entry-arrow svg { opacity: 0.5; }
+
+    /* Aisle label */
+    .aisle-label {
+        position: absolute;
+        left: 8%;
+        top: 50%;
+        transform: translateY(-50%) rotate(-90deg);
+        color: #cbd5e1;
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 4px;
+        text-transform: uppercase;
+        pointer-events: none;
+        white-space: nowrap;
+    }
+
+    /* Shelf units on right side */
+    .shelf-unit {
+        position: absolute;
+        right: 22%;
+        width: 42%;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: transform 0.15s, box-shadow 0.15s;
+        overflow: hidden;
+        border: 2px solid rgba(0,0,0,0.08);
+    }
+    .shelf-unit:active { transform: scale(0.98); }
+    .shelf-unit.highlight {
+        animation: shelfPulse 1s ease infinite;
+        z-index: 10;
+        border-color: #22c55e;
+    }
+    @keyframes shelfPulse {
+        0%, 100% { box-shadow: 0 0 0 4px rgba(34,197,94,0.4); }
+        50% { box-shadow: 0 0 0 8px rgba(34,197,94,0.15); }
+    }
+    .shelf-header {
+        padding: 6px 10px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .shelf-header .shelf-code {
+        font-weight: 800;
+        font-size: 14px;
+        color: #fff;
+    }
+    .shelf-header .shelf-count {
+        font-size: 11px;
+        background: rgba(0,0,0,0.2);
+        color: #fff;
+        padding: 1px 8px;
+        border-radius: 8px;
+    }
+    .shelf-body {
+        background: rgba(255,255,255,0.15);
+        padding: 4px 10px 6px;
+    }
+    .shelf-body .shelf-name {
+        font-size: 11px;
+        color: rgba(255,255,255,0.9);
+        font-weight: 600;
+    }
+    .shelf-body .shelf-desc {
+        font-size: 10px;
+        color: rgba(255,255,255,0.7);
+    }
+    /* Shelf edge lines to look like actual shelving */
+    .shelf-unit::after {
+        content: '';
+        position: absolute;
+        left: 0; right: 0; bottom: 0;
+        height: 3px;
+        background: rgba(0,0,0,0.15);
+    }
+
+    /* Floor zone (big bottles on floor) */
+    .floor-zone {
+        position: absolute;
+        bottom: 4%;
+        right: 4%;
+        width: 60%;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: transform 0.15s, box-shadow 0.15s;
+        border: 2px dashed rgba(0,0,0,0.15);
+        overflow: hidden;
+    }
+    .floor-zone:active { transform: scale(0.98); }
+    .floor-zone.highlight {
+        animation: shelfPulse 1s ease infinite;
+        z-index: 10;
+        border-color: #22c55e;
+        border-style: solid;
+    }
+    .floor-zone .shelf-header { padding: 6px 10px; }
+
+    /* Corner zone (energy drinks) */
+    .corner-zone {
+        position: absolute;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: transform 0.15s, box-shadow 0.15s;
+        overflow: hidden;
+        border: 2px solid rgba(0,0,0,0.08);
+    }
+    .corner-zone:active { transform: scale(0.98); }
+    .corner-zone.highlight {
+        animation: shelfPulse 1s ease infinite;
+        z-index: 10;
+        border-color: #22c55e;
+    }
+
+    /* Open space indicator */
+    .open-space {
+        position: absolute;
+        left: 5%;
+        bottom: 10%;
+        width: 30%;
+        height: 25%;
+        border: 2px dashed #e2e8f0;
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #cbd5e1;
+        font-size: 11px;
+        text-align: center;
+        pointer-events: none;
+    }
+
+    .map-legend {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        margin-top: 12px;
+        font-size: 11px;
+        color: var(--text-muted);
+    }
+
+    /* Locate Result */
+    .locate-result { margin: 12px 16px; }
+    .locate-found {
+        background: linear-gradient(135deg, #f0fdf4, #dcfce7);
+        border: 1px solid #bbf7d0;
+        border-radius: 14px;
+        padding: 16px;
+    }
+    .locate-found h3 { color: var(--accent-dark); font-size: 17px; margin-bottom: 8px; }
+    .locate-found .total { font-size: 28px; font-weight: 700; color: var(--accent-dark); }
+    .locate-found .total span { font-size: 14px; font-weight: 400; color: var(--text-muted); }
+    .location-item {
+        background: var(--card);
+        border-radius: 10px;
+        padding: 12px;
+        margin-top: 8px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+    .location-item .zone-badge {
+        display: inline-block;
+        padding: 3px 10px;
+        border-radius: 6px;
+        color: #fff;
+        font-weight: 700;
+        font-size: 13px;
+    }
+    .location-item .expiry-hint { font-size: 12px; color: var(--warning); margin-top: 2px; }
+    .locate-notfound {
+        background: #fef2f2;
+        border: 1px solid #fecaca;
+        border-radius: 14px;
+        padding: 20px;
+        text-align: center;
+    }
+    .locate-notfound h3 { color: var(--danger); }
+    .locate-notfound p { color: var(--text-muted); font-size: 14px; margin-top: 4px; }
+
+    /* Alerts */
+    .alerts-card {
+        background: var(--card);
+        border-radius: 14px;
+        padding: 16px;
+        margin: 12px 16px;
+        box-shadow: var(--shadow);
+    }
+    .alert-badge {
+        background: var(--danger);
+        color: #fff;
+        font-size: 11px;
+        font-weight: 700;
+        padding: 2px 8px;
+        border-radius: 10px;
+        margin-left: 6px;
+    }
+    .reorder-item {
+        padding: 10px 0;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .reorder-item:last-child { border-bottom: none; }
+    .reorder-item .shortage { color: var(--danger); font-weight: 700; font-size: 14px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="header">
+    <h1>Storeroom</h1>
+    <p>Scan to locate · Visual map · Reorder alerts</p>
+</div>
+
+<!-- Locate Product -->
+<div class="locate-card">
+    <div class="form-group" style="margin-bottom:8px;">
+        <label>Find a product</label>
+        <div class="locate-row">
+            <input type="text" id="locate-barcode" placeholder="Scan or type barcode" inputmode="numeric">
+            <button class="btn btn-primary" onclick="locateProduct()">Find</button>
+        </div>
+    </div>
+    <div style="text-align:center;">
+        <button class="btn btn-outline" onclick="toggleLocateScanner()" id="locate-scan-btn" style="width:auto; display:inline-block; padding:8px 20px; font-size:13px;">Use Camera</button>
+    </div>
+    <div id="locate-scanner" style="display:none; margin-top:10px;">
+        <div style="max-width:300px; margin:0 auto; border-radius:10px; overflow:hidden; background:#111; aspect-ratio:4/3;" id="locate-scanner-container"></div>
+    </div>
+</div>
+
+<!-- Locate Result -->
+<div class="locate-result" id="locate-result" style="display:none;"></div>
+
+<!-- Storeroom Map -->
+<div class="map-card">
+    <h2>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
+        Storeroom Floor Plan
+    </h2>
+    <div class="floor-plan" id="storeroom-map">
+        <!-- Door at entrance -->
+        <div class="door">🚪 DOOR</div>
+        <div class="entry-arrow">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14"/><path d="M19 12l-7 7-7-7"/></svg>
+            <span style="font-size:9px;">enter</span>
+        </div>
+
+        <!-- Aisle on left -->
+        <div class="aisle-label">← AISLE →</div>
+
+        <!-- Open space on left -->
+        <div class="open-space">
+            Open<br>Space
+        </div>
+
+        <!-- Shelves will be rendered by JS -->
+    </div>
+    <div class="map-legend" id="map-legend"></div>
+</div>
+
+<!-- Reorder Alerts -->
+<div class="alerts-card">
+    <h2>
+        Reorder Alerts
+        <span class="alert-badge" id="alert-count" style="display:none;">0</span>
+    </h2>
+    <div id="reorder-list">
+        <p style="color:var(--text-muted); text-align:center; padding:12px; font-size:14px;">Set reorder rules in Stock page to see alerts here</p>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let locateScanning = false;
+let highlightedZone = null;
+
+// Zone layout config — maps zone codes to their position in the floor plan
+const ZONE_LAYOUT = {
+    'TS': { type: 'shelf', top: '10%',  label: '📦 Top Shelf' },
+    'S1': { type: 'shelf', top: '28%', label: '🧃 Shelf 1' },
+    'S2': { type: 'shelf', top: '46%', label: '📋 Shelf 2' },
+    'RC': { type: 'corner', top: '10%', label: '⚡' },
+    'FL': { type: 'floor', label: '🧴 Floor Level' },
+};
+
+async function locateProduct() {
+    const barcode = document.getElementById('locate-barcode').value.trim();
+    if (!barcode) { showToast('Enter a barcode'); return; }
+
+    const el = document.getElementById('locate-result');
+    el.style.display = 'block';
+    el.innerHTML = '<div class="loading"><div class="spinner"></div>Finding product...</div>';
+
+    if (highlightedZone) {
+        document.querySelectorAll('.shelf-unit,.floor-zone,.corner-zone').forEach(z => z.classList.remove('highlight'));
+        highlightedZone = null;
+    }
+
+    try {
+        const resp = await fetch('/api/locate/' + barcode);
+        const data = await resp.json();
+
+        if (data.found) {
+            let locationsHtml = data.locations.map(loc => {
+                return `<div class="location-item" onclick="highlightZone('${loc.zone_code}')">
+                    <div>
+                        <span class="zone-badge" style="background:${loc.zone_color};">${loc.zone_code}</span>
+                        <strong style="margin-left:8px;">${loc.zone_name}</strong>
+                        ${loc.location_note ? `<div style="font-size:12px; color:var(--text-muted); margin-top:2px;">${loc.location_note}</div>` : ''}
+                        <div class="expiry-hint">Use first: expires ${loc.use_first_expiry}</div>
+                    </div>
+                    <div style="text-align:right;">
+                        <div style="font-size:20px; font-weight:700;">${loc.quantity}</div>
+                        <div style="font-size:11px; color:var(--text-muted);">units</div>
+                    </div>
+                </div>`;
+            }).join('');
+
+            el.innerHTML = `<div class="locate-found">
+                <h3>${data.name}</h3>
+                <div class="total">${data.total_quantity} <span>in storeroom</span></div>
+                ${locationsHtml}
+                <p style="font-size:12px; color:var(--text-muted); margin-top:10px;">Tap a location to highlight it on the map</p>
+            </div>`;
+
+            if (data.locations.length > 0) {
+                highlightZone(data.locations[0].zone_code);
+                setTimeout(() => {
+                    document.getElementById('storeroom-map').scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }, 300);
+            }
+        } else {
+            el.innerHTML = `<div class="locate-notfound">
+                <h3>Not in storeroom</h3>
+                <p>This product isn't in stock. Time to reorder?</p>
+            </div>`;
+        }
+    } catch {
+        el.innerHTML = '<div class="locate-notfound"><h3>Error</h3><p>Could not look up product</p></div>';
+    }
+}
+
+function highlightZone(code) {
+    document.querySelectorAll('.shelf-unit,.floor-zone,.corner-zone').forEach(z => z.classList.remove('highlight'));
+    const target = document.getElementById('zone-' + code);
+    if (target) {
+        target.classList.add('highlight');
+        highlightedZone = code;
+    }
+}
+
+function toggleLocateScanner() {
+    const area = document.getElementById('locate-scanner');
+    if (locateScanning) {
+        Quagga.stop();
+        area.style.display = 'none';
+        document.getElementById('locate-scan-btn').textContent = 'Use Camera';
+        locateScanning = false;
+        return;
+    }
+
+    area.style.display = 'block';
+    document.getElementById('locate-scan-btn').textContent = 'Stop Camera';
+
+    Quagga.init({
+        inputStream: {
+            name: "Live", type: "LiveStream",
+            target: document.getElementById('locate-scanner-container'),
+            constraints: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 } }
+        },
+        decoder: { readers: ["ean_reader", "ean_8_reader", "upc_reader", "upc_e_reader", "code_128_reader"] },
+        locate: true
+    }, function(err) {
+        if (err) { showToast('Camera not available'); return; }
+        Quagga.start();
+        locateScanning = true;
+    });
+
+    Quagga.onDetected(function(result) {
+        const code = result.codeResult.code;
+        if (!code) return;
+        const errors = result.codeResult.decodedCodes?.filter(d => d.error !== undefined)?.map(d => d.error) || [];
+        const avgError = errors.length ? errors.reduce((a, b) => a + b, 0) / errors.length : 1;
+        if (avgError > 0.25) return;
+
+        document.getElementById('locate-barcode').value = code;
+        Quagga.stop();
+        area.style.display = 'none';
+        document.getElementById('locate-scan-btn').textContent = 'Use Camera';
+        locateScanning = false;
+        showToast('Scanned: ' + code);
+        locateProduct();
+    });
+}
+
+async function loadMap() {
+    try {
+        const [zonesRes, stockRes] = await Promise.all([
+            fetch('/api/zones'),
+            fetch('/api/stock/current'),
+        ]);
+        const zones = (await zonesRes.json()).zones || [];
+        const stock = (await stockRes.json()).stock || [];
+
+        const zoneCounts = {};
+        stock.forEach(s => {
+            const zc = s.zone_code || 'unassigned';
+            zoneCounts[zc] = (zoneCounts[zc] || 0) + s.quantity;
+        });
+
+        const map = document.getElementById('storeroom-map');
+
+        zones.forEach(z => {
+            const layout = ZONE_LAYOUT[z.code];
+            if (!layout) return;
+
+            const count = zoneCounts[z.code] || 0;
+
+            if (layout.type === 'shelf') {
+                const el = document.createElement('div');
+                el.className = 'shelf-unit';
+                el.id = 'zone-' + z.code;
+                el.style.top = layout.top;
+                el.style.background = z.color;
+                el.onclick = () => showZoneDetail(z, count);
+                el.innerHTML = `
+                    <div class="shelf-header">
+                        <span class="shelf-code">${layout.label}</span>
+                        <span class="shelf-count">${count} items</span>
+                    </div>
+                    <div class="shelf-body">
+                        <div class="shelf-name">${z.description || z.name}</div>
+                    </div>`;
+                map.appendChild(el);
+            } else if (layout.type === 'floor') {
+                const el = document.createElement('div');
+                el.className = 'floor-zone';
+                el.id = 'zone-' + z.code;
+                el.style.background = z.color;
+                el.onclick = () => showZoneDetail(z, count);
+                el.innerHTML = `
+                    <div class="shelf-header">
+                        <span class="shelf-code">${layout.label}</span>
+                        <span class="shelf-count">${count} items</span>
+                    </div>
+                    <div class="shelf-body">
+                        <div class="shelf-name">${z.description || z.name}</div>
+                        <div class="shelf-desc">On the floor — large bottles</div>
+                    </div>`;
+                map.appendChild(el);
+            } else if (layout.type === 'corner') {
+                const el = document.createElement('div');
+                el.className = 'corner-zone';
+                el.id = 'zone-' + z.code;
+                el.style.top = layout.top;
+                el.style.right = '4%';
+                el.style.width = '18%';
+                el.style.height = '14%';
+                el.style.background = z.color;
+                el.onclick = () => showZoneDetail(z, count);
+                el.innerHTML = `
+                    <div style="padding:6px; text-align:center;">
+                        <div style="font-size:11px; font-weight:800; color:#fff;">${layout.label}</div>
+                        <div style="font-size:9px; color:rgba(255,255,255,0.8);">${z.description}</div>
+                        <div style="font-size:10px; background:rgba(0,0,0,0.2); color:#fff; padding:1px 6px; border-radius:6px; margin-top:3px; display:inline-block;">${count}</div>
+                    </div>`;
+                map.appendChild(el);
+            }
+        });
+
+        const legend = document.getElementById('map-legend');
+        legend.innerHTML = zones.map(z =>
+            `<span style="display:inline-flex; align-items:center; gap:3px; margin-right:8px;">
+                <span style="width:10px; height:10px; border-radius:3px; background:${z.color}; display:inline-block;"></span>
+                ${z.code}: ${z.description || z.name}
+            </span>`
+        ).join('');
+    } catch (e) {
+        console.error('Map load error', e);
+    }
+}
+
+function showZoneDetail(zone, count) {
+    highlightZone(zone.code);
+    showToast(`${zone.description || zone.name} — ${count} items`);
+}
+
+async function loadAlerts() {
+    try {
+        const resp = await fetch('/api/reorder/alerts');
+        const data = await resp.json();
+
+        if (data.alerts?.length) {
+            document.getElementById('alert-count').style.display = 'inline';
+            document.getElementById('alert-count').textContent = data.total;
+
+            document.getElementById('reorder-list').innerHTML = data.alerts.map(a =>
+                `<div class="reorder-item">
+                    <div>
+                        <strong>${a.name}</strong>
+                        <div style="font-size:12px; color:var(--text-muted);">
+                            ${a.current_stock} left · min ${a.min_quantity}
+                            ${a.supplier_note ? ' · ' + a.supplier_note : ''}
+                        </div>
+                    </div>
+                    <div class="shortage">Need ${a.shortage}</div>
+                </div>`
+            ).join('');
+        }
+    } catch {}
+}
+
+loadMap();
+loadAlerts();
+</script>
+{% endblock %}
