@@ -216,6 +216,27 @@ async def add_stock(
     return JSONResponse({"success": True, "data": result.data})
 
 
+@app.get("/api/stock/lookup/{barcode}")
+async def stock_lookup(barcode: str):
+    """Look up product details from our stock database."""
+    if not supabase:
+        return JSONResponse({"found": False})
+    rows = supabase.table("stock").select("*").eq("barcode", barcode).execute().data
+    if not rows:
+        return JSONResponse({"found": False})
+    total_qty = sum(r["quantity"] for r in rows)
+    nearest = rows[0]
+    return JSONResponse({
+        "found": True,
+        "name": nearest.get("name", barcode),
+        "sell_price": nearest.get("sell_price", 0),
+        "cost_price": nearest.get("cost_price", 0),
+        "quantity": total_qty,
+        "expiry_date": nearest.get("expiry_date"),
+        "zone_code": nearest.get("zone_code", ""),
+    })
+
+
 @app.get("/api/stock/current")
 async def get_current_stock():
     """Get all current stock with expiry info."""
@@ -700,21 +721,20 @@ async def category_sales(start: Optional[str] = None, end: Optional[str] = None)
 
 
 @app.get("/api/ai/brain-analysis")
-async def brain_analysis():
-    """The AI Brain: detects customer patterns, buying habits, and generates
-    order recommendations with full reasoning and calculations."""
-    if not supabase or not GROQ_API_KEY:
-        return JSONResponse({"error": "AI not configured"})
+async def brain_analysis(days: int = 10):
+    """The AI Brain: analyzes ALL products over a chosen date range.
+    Categorizes by selling frequency and calculates order quantities."""
+    if not supabase:
+        return JSONResponse({"error": "Database not configured"})
 
-    range_start = (datetime.utcnow() - timedelta(days=28)).strftime("%Y-%m-%dT00:00:00")
+    days = max(1, min(days, 90))
+    range_start = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%dT00:00:00")
     range_end = datetime.utcnow().isoformat()
     sales_data = fetch_all_sales(range_start, range_end)
     stock = supabase.table("stock").select("*").gt("quantity", 0).execute()
 
     if not sales_data:
-        return JSONResponse({"error": "No sales data found"})
-
-    start_dt = datetime.fromisoformat(range_start[:10])
+        return JSONResponse({"error": "No sales data found for this period"})
 
     # Build per-product daily sales grid
     product_daily = {}
@@ -734,97 +754,133 @@ async def brain_analysis():
         current_stock.setdefault(s["barcode"], 0)
         current_stock[s["barcode"]] += s["quantity"]
 
-    # Build compact daily breakdown for AI (top 12 products, short date keys)
-    product_details = []
-    for bc, daily in sorted(product_daily.items(), key=lambda x: sum(x[1].values()), reverse=True)[:3]:
+    # Analyze EVERY product
+    patterns = []
+    total_order = 0
+    daily_sellers = 0
+    regular_buyers = 0
+
+    for bc, daily in product_daily.items():
         name = product_names.get(bc, bc)
         stock_now = current_stock.get(bc, 0)
-        days_sorted = sorted(daily.items())
-        daily_str = ",".join([f"{d[5:]}:{q}" for d, q in days_sorted])
-        total = sum(daily.values())
-        product_details.append(f"{name}|stock:{stock_now}|sold:{total}|days:[{daily_str}]")
+        total_sold = sum(daily.values())
+        days_active = len(daily)
+        avg_daily = round(total_sold / days, 1)
+        avg_when_sold = round(total_sold / days_active, 1) if days_active > 0 else 0
 
-    prompt = f"""/no_think
-Analyze sales. Return ONLY compact JSON. Keep evidence and calculation SHORT (under 15 words each).
-Rules: R1=regular buyers, R2=weekend spikes, R3=steady, R4=trending, R6=order=demand-stock+10%.
-DATA:
-{chr(10).join(product_details)}
-JSON:{{"detected_patterns":[{{"product":"name","pattern_type":"steady|weekend_spike|regular_buyer|trending_up","evidence":"brief","customer_insight":"brief","calculation":"brief math","predicted_weekly_demand":N,"current_stock":N,"order_qty":N,"confidence":"high|medium","priority":"critical|important|normal"}}],"summary":{{"total_patterns_detected":N,"regular_buyers_found":N,"total_order_units":N,"key_insight":"1 sentence"}}}}"""
-
-    import asyncio
-    try:
-        resp = None
-        for attempt in range(3):
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(
-                    "https://api.groq.com/openai/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
-                    json={
-                        "model": "qwen/qwen3.8-27b",
-                        "messages": [{"role": "user", "content": prompt}],
-                        "max_tokens": 950,
-                        "temperature": 0.15,
-                    },
-                    timeout=90,
-                )
-            if resp.status_code == 429 and attempt < 2:
-                # Parse Groq's reset header (e.g. "1m26.4s" or "180ms")
-                reset_str = resp.headers.get("x-ratelimit-reset-tokens", "")
-                wait = 60
-                if "m" in reset_str and "s" in reset_str:
-                    import re as _re
-                    m = _re.match(r"(\d+)m([\d.]+)s", reset_str)
-                    if m:
-                        wait = int(m.group(1)) * 60 + float(m.group(2)) + 2
-                elif reset_str.endswith("ms"):
-                    wait = 2
-                elif reset_str.endswith("s"):
-                    wait = float(reset_str[:-1]) + 2
-                wait = min(wait, 90)
-                print(f"Brain: rate limited, retrying in {wait:.0f}s (attempt {attempt+1}, reset: {reset_str})")
-                await asyncio.sleep(wait)
-                continue
-            break
-
-        if resp.status_code != 200:
-            detail = resp.text[:200] if resp.text else "no body"
-            print(f"Groq Brain API error {resp.status_code}: {detail}")
-            return JSONResponse({"error": f"AI error ({resp.status_code})"})
-
-        msg = resp.json()["choices"][0]["message"]
-        raw = msg.get("content", "") or ""
-        # For reasoning models, the JSON may be in the reasoning field
-        if not raw.strip() and msg.get("reasoning"):
-            raw = msg["reasoning"]
-
-        import json as json_mod
-        import re
-        clean = raw.strip()
-        # Strip Qwen <think>...</think> reasoning tags
-        clean = re.sub(r"<think>.*?</think>", "", clean, flags=re.DOTALL).strip()
-        if clean.startswith("```"):
-            clean = clean.split("\n", 1)[1] if "\n" in clean else clean[3:]
-            clean = clean.rsplit("```", 1)[0]
-        clean = clean.strip()
-
-        # Try to find JSON object in the text
-        result = None
-        if clean.startswith("{"):
-            result = json_mod.loads(clean)
+        # Classify selling frequency
+        sell_ratio = days_active / days
+        if sell_ratio >= 0.8:
+            frequency = "daily"
+            daily_sellers += 1
+            confidence = "high"
+        elif sell_ratio >= 0.4:
+            frequency = "regular"
+            regular_buyers += 1
+            confidence = "high"
+        elif sell_ratio >= 0.2:
+            frequency = "occasional"
+            confidence = "medium"
         else:
-            # Search for the first { ... } block
-            match = re.search(r'\{.*\}', clean, re.DOTALL)
-            if match:
-                result = json_mod.loads(match.group())
-            else:
-                return JSONResponse({"error": "AI returned no JSON", "raw": clean[:300]})
-        return JSONResponse(result)
+            frequency = "rare"
+            confidence = "low"
 
-    except json_mod.JSONDecodeError:
-        return JSONResponse({"error": "AI returned invalid format", "raw": raw[:500]})
-    except Exception as e:
-        print(f"Brain analysis error: {e}")
-        return JSONResponse({"error": str(e)})
+        # Detect weekend spikes
+        weekend_sales = 0
+        weekday_sales = 0
+        weekend_days_count = 0
+        weekday_days_count = 0
+        for d, q in daily.items():
+            dow = datetime.fromisoformat(d).weekday()
+            if dow >= 4:  # Fri-Sun
+                weekend_sales += q
+                weekend_days_count += 1
+            else:
+                weekday_sales += q
+                weekday_days_count += 1
+
+        pattern_type = "steady"
+        weekend_avg = weekend_sales / max(weekend_days_count, 1)
+        weekday_avg = weekday_sales / max(weekday_days_count, 1)
+        if weekend_days_count >= 2 and weekday_days_count >= 2 and weekend_avg > weekday_avg * 1.4:
+            pattern_type = "weekend_spike"
+
+        # Detect alternating-day pattern (regular buyer)
+        sorted_days = sorted(daily.keys())
+        if len(sorted_days) >= 4:
+            gaps = []
+            for i in range(1, len(sorted_days)):
+                d1 = datetime.fromisoformat(sorted_days[i-1])
+                d2 = datetime.fromisoformat(sorted_days[i])
+                gaps.append((d2 - d1).days)
+            avg_gap = sum(gaps) / len(gaps)
+            if 1.5 <= avg_gap <= 2.5:
+                pattern_type = "regular_buyer"
+
+        # Detect trending
+        if days >= 7 and days_active >= 4:
+            half = len(sorted_days) // 2
+            first_half_avg = sum(daily[d] for d in sorted_days[:half]) / max(half, 1)
+            second_half_avg = sum(daily[d] for d in sorted_days[half:]) / max(len(sorted_days) - half, 1)
+            if second_half_avg > first_half_avg * 1.3:
+                pattern_type = "trending_up"
+            elif second_half_avg < first_half_avg * 0.7:
+                pattern_type = "trending_down"
+
+        # Calculate order quantity
+        predicted_weekly = round(avg_daily * 7)
+        order_qty = max(0, predicted_weekly - stock_now + round(predicted_weekly * 0.1))
+
+        if order_qty > 0:
+            priority = "critical" if stock_now < avg_daily * 2 else ("important" if stock_now < predicted_weekly else "normal")
+        else:
+            priority = "normal"
+
+        total_order += order_qty
+
+        evidence = f"Sold {total_sold} units in {days}d, active {days_active}/{days} days"
+        if pattern_type == "weekend_spike":
+            evidence += f", weekend avg {weekend_avg:.0f} vs weekday {weekday_avg:.0f}"
+        elif pattern_type == "regular_buyer":
+            evidence += f", avg gap {avg_gap:.1f} days between purchases"
+
+        calculation = f"Avg {avg_daily}/day x 7 = {predicted_weekly}, stock {stock_now}, order {predicted_weekly} - {stock_now} + 10% = {order_qty}"
+
+        patterns.append({
+            "product": name,
+            "barcode": bc,
+            "pattern_type": pattern_type,
+            "frequency": frequency,
+            "days_active": days_active,
+            "total_sold": total_sold,
+            "avg_daily": avg_daily,
+            "evidence": evidence,
+            "customer_insight": f"Sells ~{avg_when_sold} units on active days, {frequency} seller",
+            "calculation": calculation,
+            "predicted_weekly_demand": predicted_weekly,
+            "current_stock": stock_now,
+            "order_qty": order_qty,
+            "confidence": confidence,
+            "priority": priority,
+        })
+
+    # Sort: critical first, then by total_sold descending
+    priority_order = {"critical": 0, "important": 1, "normal": 2}
+    patterns.sort(key=lambda p: (priority_order.get(p["priority"], 2), -p["total_sold"]))
+
+    result = {
+        "days_analyzed": days,
+        "total_products": len(patterns),
+        "detected_patterns": patterns,
+        "summary": {
+            "total_patterns_detected": len(patterns),
+            "daily_sellers": daily_sellers,
+            "regular_sellers": regular_buyers,
+            "total_order_units": total_order,
+            "key_insight": f"Analyzed {len(patterns)} products over {days} days: {daily_sellers} sell daily, {regular_buyers} sell regularly. Total reorder: {total_order} units.",
+        },
+    }
+    return JSONResponse(result)
 
 
 # ---------- API: Storeroom / Zones ----------
