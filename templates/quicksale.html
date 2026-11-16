@@ -403,6 +403,28 @@ document.getElementById('sales-date').textContent = new Date().toLocaleDateStrin
     } catch(e) {}
 })();
 
+// Restore last scanned product on page load
+(function() {
+    try {
+        var last = JSON.parse(sessionStorage.getItem('ft_last_scan'));
+        if (last) {
+            document.getElementById('pc-name').textContent = last.name;
+            document.getElementById('pc-barcode').textContent = last.barcode;
+            document.getElementById('pc-price').textContent = last.price;
+            var stockEl = document.getElementById('pc-stock');
+            stockEl.textContent = last.stock;
+            stockEl.className = 'val ' + (last.stockClass || '');
+            document.getElementById('pc-expiry').textContent = last.expiry;
+            document.getElementById('pc-image').innerHTML = '<div class="pc-img-placeholder">📦</div>';
+            productCard.className = 'product-card show';
+            if (!last.inDatabase) {
+                saleResult.className = 'sale-result error';
+                document.getElementById('sale-msg').innerHTML = '⚠ Product not in database — <strong>add it below</strong>';
+            }
+        }
+    } catch(e) {}
+})();
+
 barcodeField.addEventListener('blur', function() {
     if (!cameraMode) setTimeout(function() { barcodeField.focus(); }, 100);
 });
@@ -434,11 +456,14 @@ async function processSale(barcode) {
     var productImage = '';
     var stockClass = '';
 
+    var inDatabase = false;
+
     // Look up product from our stock DB first
     try {
         var stockResp = await fetch('/api/stock/lookup/' + barcode);
         var stockData = await stockResp.json();
         if (stockData.found) {
+            inDatabase = true;
             productName = stockData.name;
             productPrice = '£' + parseFloat(stockData.sell_price).toFixed(2);
             productStock = stockData.quantity;
@@ -450,13 +475,14 @@ async function processSale(barcode) {
                 productExpiry = diffDays <= 0 ? 'EXPIRED' : diffDays + 'd';
             }
         } else {
-            // Fallback: external product lookup
-            var lookupResp = await fetch('/api/product/' + barcode);
-            var lookupData = await lookupResp.json();
-            if (lookupData.found) {
-                productName = lookupData.name;
-                productImage = lookupData.image || '';
-            }
+            // Fallback: external product lookup for name only
+            try {
+                var lookupResp = await fetch('/api/product/' + barcode);
+                var lookupData = await lookupResp.json();
+                if (lookupData.found) {
+                    productName = lookupData.name;
+                }
+            } catch(e2) {}
         }
     } catch(e) {}
 
@@ -468,16 +494,30 @@ async function processSale(barcode) {
     stockEl.textContent = productStock;
     stockEl.className = 'val ' + stockClass;
     document.getElementById('pc-expiry').textContent = productExpiry;
-
-    var imgContainer = document.getElementById('pc-image');
-    if (productImage) {
-        imgContainer.innerHTML = '<img class="pc-img" src="' + productImage + '" alt="">';
-    } else {
-        imgContainer.innerHTML = '<div class="pc-img-placeholder">📦</div>';
-    }
+    document.getElementById('pc-image').innerHTML = '<div class="pc-img-placeholder">📦</div>';
     productCard.className = 'product-card show';
 
-    // Record the sale
+    // Save last scanned product so it persists across tab switches
+    try { sessionStorage.setItem('ft_last_scan', JSON.stringify({barcode:barcode, name:productName, price:productPrice, stock:productStock, expiry:productExpiry, stockClass:stockClass, inDatabase:inDatabase})); } catch(e) {}
+
+    if (!inDatabase) {
+        // Product not in database — prompt to add it
+        saleResult.className = 'sale-result error';
+        document.getElementById('sale-msg').innerHTML = '⚠ Product not in database — <strong>add it below</strong>';
+        // Auto-open and pre-fill the Add Product form
+        document.getElementById('add-form').style.display = 'block';
+        document.getElementById('np-barcode').value = barcode;
+        document.getElementById('np-name').value = productName !== barcode ? productName : '';
+        document.getElementById('np-barcode').readOnly = true;
+        document.getElementById('add-form').scrollIntoView({behavior:'smooth', block:'center'});
+
+        barcodeField.placeholder = 'Scan barcode here...';
+        processing = false;
+        if (!cameraMode) barcodeField.focus();
+        return;
+    }
+
+    // Record the sale (only for products in our database)
     try {
         var body = new FormData();
         body.append('barcode', barcode);
@@ -541,6 +581,7 @@ function persistSale(name, qty, time, revenue, price) {
 function toggleAddForm() {
     var form = document.getElementById('add-form');
     form.style.display = form.style.display === 'none' ? 'block' : 'none';
+    document.getElementById('np-barcode').readOnly = false;
 }
 
 async function addProduct() {
