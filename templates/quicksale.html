@@ -2,6 +2,7 @@
 {% set active = "quicksale" %}
 
 {% block head %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <style>
     body { background: #0a0a0a; }
     .qs-wrap {
@@ -238,6 +239,29 @@
         border-radius: 20px;
         border: 1px solid #222;
     }
+
+    .scan-toggle {
+        display: flex; gap: 8px; justify-content: center; margin: 12px 0;
+    }
+    .scan-toggle button {
+        padding: 8px 18px; border-radius: 10px; border: 1px solid #333;
+        background: #161616; color: #aaa; font-size: 13px; font-weight: 600;
+        cursor: pointer; transition: all 0.15s;
+    }
+    .scan-toggle button.active {
+        background: #7c3aed; color: #fff; border-color: #7c3aed;
+    }
+    #camera-scanner {
+        display: none; background: #161616; border-radius: 16px;
+        padding: 12px; margin: 12px 0; border: 2px solid #333;
+        overflow: hidden;
+    }
+    #camera-scanner.active {
+        display: block; border-color: #7c3aed;
+        box-shadow: 0 0 20px rgba(124,58,237,0.15);
+    }
+    #reader { width: 100%; border-radius: 10px; overflow: hidden; }
+    #reader video { border-radius: 10px; }
 </style>
 {% endblock %}
 
@@ -253,9 +277,19 @@
         <div class="epos-badge">EPOS integration coming soon</div>
     </div>
 
+    <div class="scan-toggle">
+        <button class="active" id="btn-keyboard" onclick="switchMode('keyboard')">⌨️ Type / Scanner</button>
+        <button id="btn-camera" onclick="switchMode('camera')">📷 Camera Scan</button>
+    </div>
+
     <div class="scan-input-area active" id="scan-area">
         <input type="text" id="barcode-field" placeholder="Scan barcode here..." autofocus autocomplete="off">
         <div class="hint">USB/Bluetooth scanner types here automatically</div>
+    </div>
+
+    <div id="camera-scanner">
+        <div id="reader"></div>
+        <div style="text-align:center; margin-top:8px; color:#888; font-size:12px;">Point camera at barcode</div>
     </div>
 
     <div class="product-card" id="product-card">
@@ -370,9 +404,11 @@ document.getElementById('sales-date').textContent = new Date().toLocaleDateStrin
 })();
 
 barcodeField.addEventListener('blur', function() {
-    setTimeout(function() { barcodeField.focus(); }, 100);
+    if (!cameraMode) setTimeout(function() { barcodeField.focus(); }, 100);
 });
-document.addEventListener('click', function() { barcodeField.focus(); });
+document.addEventListener('click', function(e) {
+    if (!cameraMode && !e.target.closest('#add-form') && !e.target.closest('.scan-toggle') && !e.target.closest('#camera-scanner')) barcodeField.focus();
+});
 
 barcodeField.addEventListener('keydown', function(e) {
     if (e.key === 'Enter') {
@@ -567,6 +603,73 @@ async function addProduct() {
     btn.disabled = false;
     btn.textContent = 'Add to Database';
     setTimeout(function() { result.style.display = 'none'; }, 4000);
+}
+
+var html5QrCode = null;
+var cameraMode = false;
+
+function switchMode(mode) {
+    var kbBtn = document.getElementById('btn-keyboard');
+    var camBtn = document.getElementById('btn-camera');
+    var scanArea = document.getElementById('scan-area');
+    var camScanner = document.getElementById('camera-scanner');
+
+    if (mode === 'camera') {
+        cameraMode = true;
+        kbBtn.classList.remove('active');
+        camBtn.classList.add('active');
+        scanArea.style.display = 'none';
+        camScanner.className = 'active';
+        camScanner.id = 'camera-scanner';
+        document.getElementById('camera-scanner').classList.add('active');
+        startCamera();
+    } else {
+        cameraMode = false;
+        camBtn.classList.remove('active');
+        kbBtn.classList.add('active');
+        scanArea.style.display = 'block';
+        document.getElementById('camera-scanner').classList.remove('active');
+        document.getElementById('camera-scanner').style.display = 'none';
+        stopCamera();
+        barcodeField.focus();
+    }
+}
+
+function startCamera() {
+    if (html5QrCode) return;
+    html5QrCode = new Html5Qrcode("reader");
+    html5QrCode.start(
+        { facingMode: "environment" },
+        {
+            fps: 10,
+            qrbox: { width: 280, height: 120 },
+            formatsToSupport: [
+                Html5QrcodeSupportedFormats.EAN_13,
+                Html5QrcodeSupportedFormats.EAN_8,
+                Html5QrcodeSupportedFormats.UPC_A,
+                Html5QrcodeSupportedFormats.UPC_E,
+                Html5QrcodeSupportedFormats.CODE_128,
+                Html5QrcodeSupportedFormats.CODE_39,
+                Html5QrcodeSupportedFormats.QR_CODE,
+            ]
+        },
+        function(decodedText) {
+            if (!processing) {
+                processSale(decodedText);
+            }
+        },
+        function() {}
+    ).catch(function(err) {
+        document.getElementById('reader').innerHTML = '<div style="text-align:center; padding:30px; color:#f87171;">Camera access denied or not available.<br><span style="font-size:12px; color:#888;">Check browser permissions.</span></div>';
+    });
+}
+
+function stopCamera() {
+    if (html5QrCode) {
+        try { html5QrCode.stop(); } catch(e) {}
+        html5QrCode = null;
+        document.getElementById('reader').innerHTML = '';
+    }
 }
 
 function playBeep() {
