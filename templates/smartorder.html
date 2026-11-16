@@ -214,6 +214,10 @@
         Generate Smart Order for Next Week
     </button>
 
+    <button class="btn-export" onclick="clearPredictions()" id="clear-btn" style="display:none; margin:0 auto 12px; color:#ef4444; border-color:#ef4444;">
+        Clear Results
+    </button>
+
     <!-- Loading -->
     <div id="loading" style="display:none;">
         <div class="loading-brain">
@@ -375,6 +379,19 @@ async function loadCategories() {
 loadChart();
 loadCategories();
 
+// Restore cached predictions on page load
+(function() {
+    try {
+        var cached = sessionStorage.getItem('ft_predictions');
+        if (cached) {
+            allPredictions = JSON.parse(cached);
+            renderCategoryTabs();
+            renderPredictions();
+            document.getElementById('gen-btn').textContent = 'Regenerate Predictions';
+        }
+    } catch(e) {}
+})();
+
 // Generate AI predictions
 async function generatePredictions() {
     const btn = document.getElementById('gen-btn');
@@ -401,6 +418,8 @@ async function generatePredictions() {
         allPredictions.forEach(p => {
             p.sold = (p.week1||0) + (p.week2||0) + (p.week3||0) + (p.week4||0);
         });
+
+        try { sessionStorage.setItem('ft_predictions', JSON.stringify(allPredictions)); } catch(e) {}
 
         renderCategoryTabs();
         renderPredictions();
@@ -544,11 +563,20 @@ function renderPredictions() {
     `;
     document.getElementById('result-count').textContent = filtered.length + ' products shown';
     document.getElementById('results').style.display = 'block';
+    document.getElementById('clear-btn').style.display = 'flex';
 }
 
 function formatPattern(p) {
     return {'steady':'Steady','trending_up':'Trending Up','trending_down':'Trending Down',
         'weekend_heavy':'Weekend Heavy','regular_buyer':'Regular Buyer','seasonal':'Seasonal'}[p] || p;
+}
+
+function clearPredictions() {
+    allPredictions = [];
+    try { sessionStorage.removeItem('ft_predictions'); } catch(e) {}
+    document.getElementById('results').style.display = 'none';
+    document.getElementById('clear-btn').style.display = 'none';
+    document.getElementById('gen-btn').textContent = 'Generate Smart Order for Next Week';
 }
 
 function exportCSV() {

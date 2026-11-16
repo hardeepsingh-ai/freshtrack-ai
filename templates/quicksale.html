@@ -286,14 +286,50 @@
         <div class="sale-msg" id="sale-msg"></div>
     </div>
 
-    <div class="qs-counter">
-        <div class="num" id="sold-count">0</div>
-        <div class="label">items sold this session</div>
+    <!-- Today's stats -->
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:16px 0;">
+        <div style="background:#161616; border-radius:12px; padding:14px; text-align:center; border:1px solid #222;">
+            <div style="font-size:32px; font-weight:800; color:#22c55e;" id="sold-count">0</div>
+            <div style="color:#666; font-size:11px; text-transform:uppercase; letter-spacing:0.5px;">Items Sold Today</div>
+        </div>
+        <div style="background:#161616; border-radius:12px; padding:14px; text-align:center; border:1px solid #222;">
+            <div style="font-size:32px; font-weight:800; color:#22c55e;" id="daily-revenue">£0.00</div>
+            <div style="color:#666; font-size:11px; text-transform:uppercase; letter-spacing:0.5px;">Today's Revenue</div>
+        </div>
     </div>
 
-    <div class="qs-log" id="log-section" style="display:none;">
-        <h3>Recent scans</h3>
+    <!-- Today's sales history -->
+    <div class="qs-log" id="log-section">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <h3 style="margin:0;">Today's Sales</h3>
+            <span style="color:#666; font-size:12px;" id="sales-date"></span>
+        </div>
         <div id="log-list"></div>
+        <div id="no-sales" style="text-align:center; color:#555; font-size:13px; padding:20px 0;">No sales recorded today</div>
+    </div>
+
+    <!-- Add New Product -->
+    <div style="margin-top:24px;">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+            <h3 style="color:#888; font-size:12px; text-transform:uppercase; letter-spacing:1px; margin:0;">Add New Product</h3>
+            <button onclick="toggleAddForm()" id="add-toggle" style="background:#7c3aed; color:#fff; border:none; border-radius:8px; padding:6px 14px; font-size:12px; font-weight:600; cursor:pointer;">+ Add</button>
+        </div>
+        <div id="add-form" style="display:none; background:#161616; border-radius:14px; padding:16px; border:1px solid #222;">
+            <div style="display:grid; gap:10px;">
+                <input type="text" id="np-barcode" placeholder="Barcode" style="background:#0d0d1a; border:1px solid #333; border-radius:8px; padding:10px 12px; color:#fff; font-size:14px; font-family:'Courier New',monospace;">
+                <input type="text" id="np-name" placeholder="Product name" style="background:#0d0d1a; border:1px solid #333; border-radius:8px; padding:10px 12px; color:#fff; font-size:14px;">
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                    <input type="number" step="0.01" id="np-sell" placeholder="Sell price (£)" style="background:#0d0d1a; border:1px solid #333; border-radius:8px; padding:10px 12px; color:#fff; font-size:14px;">
+                    <input type="number" step="0.01" id="np-cost" placeholder="Cost price (£)" style="background:#0d0d1a; border:1px solid #333; border-radius:8px; padding:10px 12px; color:#fff; font-size:14px;">
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                    <input type="number" id="np-qty" placeholder="Quantity" style="background:#0d0d1a; border:1px solid #333; border-radius:8px; padding:10px 12px; color:#fff; font-size:14px;">
+                    <input type="date" id="np-expiry" style="background:#0d0d1a; border:1px solid #333; border-radius:8px; padding:10px 12px; color:#fff; font-size:14px;">
+                </div>
+                <button onclick="addProduct()" id="np-btn" style="background:linear-gradient(135deg,#7c3aed,#6d28d9); color:#fff; border:none; border-radius:10px; padding:12px; font-size:14px; font-weight:600; cursor:pointer;">Add to Database</button>
+                <div id="np-result" style="display:none; text-align:center; font-size:13px; padding:8px; border-radius:8px;"></div>
+            </div>
+        </div>
     </div>
 </div>
 {% endblock %}
@@ -304,9 +340,34 @@ var barcodeField = document.getElementById('barcode-field');
 var productCard = document.getElementById('product-card');
 var saleResult = document.getElementById('sale-result');
 var logList = document.getElementById('log-list');
-var logSection = document.getElementById('log-section');
 var soldCount = 0;
+var dailyRevenue = 0;
 var processing = false;
+var todayKey = 'ft_sales_' + new Date().toISOString().slice(0,10);
+
+document.getElementById('sales-date').textContent = new Date().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'short'});
+
+// Load today's persisted sales
+(function() {
+    try {
+        // Clear old days
+        for (var i = 0; i < sessionStorage.length; i++) {
+            var k = sessionStorage.key(i);
+            if (k && k.startsWith('ft_sales_') && k !== todayKey) sessionStorage.removeItem(k);
+        }
+        var saved = JSON.parse(sessionStorage.getItem(todayKey) || '[]');
+        if (saved.length > 0) {
+            document.getElementById('no-sales').style.display = 'none';
+            saved.forEach(function(s) {
+                soldCount += s.qty;
+                dailyRevenue += s.revenue;
+                renderLogItem(s.name, s.qty, s.time, s.price);
+            });
+            document.getElementById('sold-count').textContent = soldCount;
+            document.getElementById('daily-revenue').textContent = '£' + dailyRevenue.toFixed(2);
+        }
+    } catch(e) {}
+})();
 
 barcodeField.addEventListener('blur', function() {
     setTimeout(function() { barcodeField.focus(); }, 100);
@@ -391,11 +452,15 @@ async function processSale(barcode) {
 
         if (data.success && data.sold > 0) {
             soldCount++;
+            var priceNum = parseFloat(productPrice.replace('£','')) || 0;
+            dailyRevenue += priceNum;
             document.getElementById('sold-count').textContent = soldCount;
+            document.getElementById('daily-revenue').textContent = '£' + dailyRevenue.toFixed(2);
             saleResult.className = 'sale-result success';
             document.getElementById('sale-msg').textContent = '✓ Sold 1x ' + productName + ' — stock updated';
-            addLog(productName, data.sold);
-            // Update stock display
+            var timeStr = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+            addLog(productName, data.sold, timeStr, productPrice);
+            persistSale(productName, data.sold, timeStr, priceNum, productPrice);
             if (productStock !== '—') {
                 var newStock = parseInt(productStock) - 1;
                 stockEl.textContent = newStock;
@@ -416,14 +481,92 @@ async function processSale(barcode) {
     barcodeField.focus();
 }
 
-function addLog(name, qty) {
-    logSection.style.display = 'block';
-    var time = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+function addLog(name, qty, time, price) {
+    document.getElementById('no-sales').style.display = 'none';
+    renderLogItem(name, qty, time, price);
+}
+
+function renderLogItem(name, qty, time, price) {
     var item = document.createElement('div');
     item.className = 'qs-log-item';
-    item.innerHTML = '<span class="name">' + name + '</span><span class="qty">-' + qty + '</span><span class="time">' + time + '</span>';
+    item.innerHTML = '<span class="name">' + name + '</span><span class="qty" style="margin-left:auto; margin-right:10px;">' + (price || '') + '</span><span class="qty">-' + qty + '</span><span class="time">' + time + '</span>';
     logList.prepend(item);
-    while (logList.children.length > 20) logList.lastChild.remove();
+    while (logList.children.length > 50) logList.lastChild.remove();
+}
+
+function persistSale(name, qty, time, revenue, price) {
+    try {
+        var saved = JSON.parse(sessionStorage.getItem(todayKey) || '[]');
+        saved.push({name: name, qty: qty, time: time, revenue: revenue, price: price});
+        sessionStorage.setItem(todayKey, JSON.stringify(saved));
+    } catch(e) {}
+}
+
+function toggleAddForm() {
+    var form = document.getElementById('add-form');
+    form.style.display = form.style.display === 'none' ? 'block' : 'none';
+}
+
+async function addProduct() {
+    var btn = document.getElementById('np-btn');
+    var result = document.getElementById('np-result');
+    var barcode = document.getElementById('np-barcode').value.trim();
+    var name = document.getElementById('np-name').value.trim();
+    var sell = document.getElementById('np-sell').value;
+    var cost = document.getElementById('np-cost').value;
+    var qty = document.getElementById('np-qty').value;
+    var expiry = document.getElementById('np-expiry').value;
+
+    if (!barcode || !name || !qty || !expiry) {
+        result.style.display = 'block';
+        result.style.background = '#3b1111';
+        result.style.color = '#f87171';
+        result.textContent = 'Fill in barcode, name, quantity and expiry';
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Adding...';
+
+    try {
+        var body = new FormData();
+        body.append('barcode', barcode);
+        body.append('name', name);
+        body.append('sell_price', sell || '0');
+        body.append('cost_price', cost || '0');
+        body.append('quantity', qty);
+        body.append('expiry_date', expiry);
+
+        var resp = await fetch('/api/stock/add', { method: 'POST', body: body });
+        var data = await resp.json();
+
+        if (data.success) {
+            result.style.display = 'block';
+            result.style.background = '#052e16';
+            result.style.color = '#22c55e';
+            result.textContent = '✓ ' + name + ' added to database';
+            document.getElementById('np-barcode').value = '';
+            document.getElementById('np-name').value = '';
+            document.getElementById('np-sell').value = '';
+            document.getElementById('np-cost').value = '';
+            document.getElementById('np-qty').value = '';
+            document.getElementById('np-expiry').value = '';
+        } else {
+            result.style.display = 'block';
+            result.style.background = '#3b1111';
+            result.style.color = '#f87171';
+            result.textContent = '✗ Failed to add product';
+        }
+    } catch(e) {
+        result.style.display = 'block';
+        result.style.background = '#3b1111';
+        result.style.color = '#f87171';
+        result.textContent = '✗ Error: ' + e.message;
+    }
+
+    btn.disabled = false;
+    btn.textContent = 'Add to Database';
+    setTimeout(function() { result.style.display = 'none'; }, 4000);
 }
 
 function playBeep() {
